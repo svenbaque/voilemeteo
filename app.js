@@ -39,6 +39,22 @@ const store = {
   set theme(t) {
     try { localStorage.setItem('theme', t); } catch { /* ignore */ }
   },
+  // Identifiant aléatoire de l'appareil, pour que GitHub sache à qui envoyer quelles notifications.
+  get uid() {
+    let id = '';
+    try { id = localStorage.getItem('uid') || ''; } catch { /* ignore */ }
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+      id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
+      try { localStorage.setItem('uid', id); } catch { /* ignore */ }
+    }
+    return id;
+  },
+  get pushOn() {
+    try { return localStorage.getItem('pushOn') === '1'; } catch { return false; }
+  },
+  set pushOn(on) {
+    try { localStorage.setItem('pushOn', on ? '1' : '0'); } catch { /* ignore */ }
+  },
   get weekly() {
     try { return localStorage.getItem('hebdo') !== '0'; } catch { return true; }
   },

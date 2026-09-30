@@ -669,5 +669,11 @@ scheduleSpotSync();
 
 // Le service worker permet l'installation sur l'écran d'accueil et l'accès hors connexion.
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
-  navigator.serviceWorker.register('sw.js').catch(() => { /* facultatif */ });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).catch(() => { /* facultatif */ });
+  // Nouvelle version installée : on recharge une fois pour l'afficher tout de suite.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (hadController && !reloaded) { reloaded = true; location.reload(); }
+  });
 }

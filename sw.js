@@ -1,5 +1,5 @@
 // Service worker : garde l'app et les dernières prévisions pour un usage hors connexion (en mer !).
-const SHELL_CACHE = 'voilemeteo-shell-v3';
+const SHELL_CACHE = 'voilemeteo-shell-v4';
 const DATA_CACHE = 'voilemeteo-data-v1';
 const SHELL = [
   './',
@@ -17,7 +17,7 @@ const SHELL = [
 ];
 
 self.addEventListener('install', event => {
-  event.waitUntil(caches.open(SHELL_CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting()));
+  event.waitUntil(caches.open(SHELL_CACHE).then(cache => cache.addAll(SHELL.map(url => new Request(url, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', event => {
@@ -52,18 +52,16 @@ self.addEventListener('fetch', event => {
   // Tuiles de carte : pas de mise en cache (trop volumineux).
   if (url.hostname.includes('arcgisonline.com')) return;
 
-  // Application : réponse immédiate depuis le cache, mise à jour en arrière-plan.
+  // Application : toujours la dernière version s'il y a du réseau, sinon celle enregistrée (en mer).
   event.respondWith(
-    caches.open(SHELL_CACHE).then(cache =>
-      cache.match(request).then(hit => {
-        const network = fetch(request)
-          .then(response => {
-            if (response.ok) cache.put(request, response.clone());
-            return response;
-          })
-          .catch(() => hit);
-        return hit || network;
+    fetch(request, { cache: 'no-cache' })
+      .then(response => {
+        if (response.ok) {
+          const copy = response.clone();
+          caches.open(SHELL_CACHE).then(cache => cache.put(request, copy));
+        }
+        return response;
       })
-    )
+      .catch(() => caches.match(request, { ignoreSearch: true }).then(hit => hit || Response.error()))
   );
 });

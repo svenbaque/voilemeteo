@@ -314,16 +314,19 @@ function renderList() {
 
   if (!spots.length) {
     view.innerHTML = `
+      ${installTutorial()}
       <div class="empty">
         <div class="boat">⛵</div>
         <h2>Aucun spot</h2>
         <p>Ajoute tes spots de navigation préférés pour suivre le vent heure par heure.</p>
         <a class="btn" href="#/add">Ajouter un spot</a>
       </div>`;
+    bindInstallTutorial();
     return;
   }
 
   view.innerHTML = `
+    ${installTutorial()}
     <ul class="list">
       ${spots.map((s, i) => {
         const inner = `
@@ -342,6 +345,7 @@ function renderList() {
       }).join('')}
     </ul>`;
 
+  bindInstallTutorial();
   view.querySelectorAll('[data-act]').forEach(btn => {
     btn.onclick = () => {
       const id = btn.closest('.row').dataset.id;
@@ -421,6 +425,73 @@ function enableDragSort(list) {
       grip.addEventListener('pointercancel', onEnd);
     });
   });
+}
+
+// ---------- Tutoriel d'installation (site web uniquement, jamais dans l'app installée) ----------
+
+const isIOS = () => /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const isAndroid = () => /Android/.test(navigator.userAgent);
+let installPrompt = null;
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  installPrompt = e;
+  if ((location.hash.slice(1) || '/') === '/') renderList();
+});
+
+const SHARE_ICON = '<svg class="ios-share" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3v12M8 7l4-4 4 4" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><path d="M7 10H5v11h14V10h-2" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/></svg>';
+
+function installTutorial() {
+  if (isStandalone()) return '';
+  let dismissed = false;
+  try { dismissed = sessionStorage.getItem('tutoMasque') === '1'; } catch { /* ignore */ }
+  if (dismissed) return '<button class="install-reopen" id="tuto-open">📲 Installer VoileMétéo sur ton téléphone</button>';
+
+  let steps;
+  if (isAndroid()) {
+    steps = installPrompt
+      ? '<li>Touche le bouton ci-dessous, puis <b>Installer</b>.</li>'
+      : `
+      <li>Ouvre cette page dans <b>Chrome</b>.</li>
+      <li>Touche le menu <b>⋮</b> en haut à droite.</li>
+      <li>Choisis <b>Ajouter à l'écran d'accueil</b> (ou <b>Installer l'application</b>).</li>
+      <li>Ouvre VoileMétéo depuis sa nouvelle icône.</li>`;
+  } else if (isIOS()) {
+    steps = `
+      <li>Ouvre cette page dans <b>Safari</b>.</li>
+      <li>Touche le bouton <b>Partager</b> ${SHARE_ICON} (en bas de l'écran, ou en haut sur iPad).</li>
+      <li>Fais défiler et choisis <b>Sur l'écran d'accueil</b>.</li>
+      <li>Touche <b>Ajouter</b>, puis ouvre VoileMétéo depuis sa nouvelle icône.</li>`;
+  } else {
+    steps = `
+      <li>Ouvre ce lien sur ton <b>téléphone</b> : <b>svenbaque.github.io/voilemeteo</b></li>
+      <li>Sur iPhone : <b>Safari</b> → Partager ${SHARE_ICON} → <b>Sur l'écran d'accueil</b>.</li>
+      <li>Sur Android : <b>Chrome</b> → menu ⋮ → <b>Ajouter à l'écran d'accueil</b>.</li>`;
+  }
+
+  return `
+    <div class="card install">
+      <div class="install-head">
+        <img src="icons/icon-180.png" alt="" width="44" height="44">
+        <div><b>Installe VoileMétéo</b><div class="sub muted">Sur ton écran d'accueil, comme une vraie app : plein écran, et notifications quand il y a du vent.</div></div>
+      </div>
+      <ol class="install-steps">${steps}</ol>
+      ${installPrompt ? '<button class="btn" id="install-btn">Installer l\'app</button>' : ''}
+      <button class="install-hide" id="tuto-hide">Masquer</button>
+    </div>`;
+}
+
+function bindInstallTutorial() {
+  const hide = $('#tuto-hide');
+  if (hide) hide.onclick = () => { try { sessionStorage.setItem('tutoMasque', '1'); } catch { /* ignore */ } renderList(); };
+  const open = $('#tuto-open');
+  if (open) open.onclick = () => { try { sessionStorage.removeItem('tutoMasque'); } catch { /* ignore */ } renderList(); };
+  const btn = $('#install-btn');
+  if (btn) btn.onclick = async () => {
+    installPrompt.prompt();
+    await installPrompt.userChoice.catch(() => null);
+    installPrompt = null;
+    renderList();
+  };
 }
 
 function alertsLink() {

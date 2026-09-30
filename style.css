@@ -455,3 +455,36 @@ input[type="search"], .field input {
 .switch:checked { background: #34c759; }
 .switch:checked::after { transform: translateX(20px); }
 .switch:disabled { cursor: default; }
+
+/* Tutoriel d'installation (site web uniquement) */
+.install { position: relative; border: 1.5px solid var(--accent); }
+.install-head { display: flex; gap: 12px; align-items: center; padding-right: 64px; }
+.install-head img { border-radius: 10px; flex: none; }
+.install-steps { margin: 12px 0 4px; padding-left: 22px; }
+.install-steps li { margin: 6px 0; font-size: 15px; }
+.ios-share { width: 18px; height: 18px; vertical-align: -3px; color: var(--accent); }
+.install-hide {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  font: 13px/1 inherit;
+  cursor: pointer;
+}
+.install-reopen {
+  display: block;
+  width: 100%;
+  margin-bottom: 12px;
+  border: 0;
+  border-radius: 12px;
+  padding: 12px;
+  background: var(--card);
+  color: var(--accent);
+  font: 600 15px/1.2 inherit;
+  cursor: pointer;
+}
+
+/* Garde le titre centré même quand le bouton de gauche est absent */
+#left[hidden] { display: block; visibility: hidden; }

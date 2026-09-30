@@ -306,3 +306,53 @@ input[type="search"], .field input {
   cursor: pointer;
 }
 .pencil { font-size: 13px; }
+
+/* Choix de l'affichage */
+.seg {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 2px;
+  background: var(--chip);
+  border-radius: 10px;
+  padding: 2px;
+  margin-bottom: 12px;
+}
+.seg button {
+  border: 0;
+  background: none;
+  color: var(--text);
+  font: 600 13px/1.2 inherit;
+  padding: 8px 4px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+.seg button.on { background: var(--card); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.15); }
+
+/* Tableau de comparaison des modèles */
+.ctable { background: var(--card); border-radius: 12px; padding: 6px; }
+.chead, .crow { display: grid; gap: 3px; align-items: center; }
+.chead { font-size: 10px; font-weight: 800; text-align: center; padding: 2px 0 6px; white-space: nowrap; }
+.crow { padding: 1.5px 0; }
+.crow .h { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--muted); }
+.cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  border-radius: 6px;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+}
+.cell .top { display: flex; align-items: center; gap: 2px; font-weight: 800; font-size: 14px; }
+.cell .arrow { width: 10px; height: 10px; }
+.cell small { font-size: 10px; opacity: 0.75; }
+.cell.none { background: var(--chip); color: var(--muted); }
+.agree { text-align: center; font-weight: 900; font-size: 14px; }
+.agree.ok { color: #2fa84f; }
+.agree.mid { color: #e8930c; }
+.agree.bad { color: var(--danger); }
+
+.howto summary { font-weight: 600; cursor: pointer; }
+.howto p { font-size: 14px; margin: 8px 0 0; }
+.agree[data-label] { cursor: pointer; }

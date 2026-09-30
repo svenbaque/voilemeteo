@@ -1,5 +1,5 @@
 // Service worker : garde l'app et les dernières prévisions pour un usage hors connexion (en mer !).
-const SHELL_CACHE = 'voilemeteo-shell-v4';
+const SHELL_CACHE = 'voilemeteo-shell-v5';
 const DATA_CACHE = 'voilemeteo-data-v1';
 const SHELL = [
   './',
@@ -13,7 +13,6 @@ const SHELL = [
   'icons/icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js',
-  'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js',
 ];
 
 self.addEventListener('install', event => {

@@ -2,12 +2,12 @@
 
 // Modèles disponibles via l'API gratuite Open-Meteo (même liste que l'app iPhone).
 const MODELS = [
-  { id: 'meteofrance_arome_france_hd', name: 'AROME HD', color: '#0073d9', info: 'Météo-France · maille 1,5 km · ~2 jours · France' },
-  { id: 'meteofrance_arome_france', name: 'AROME', color: '#4db3f2', info: 'Météo-France · maille 2,5 km · ~2 jours · France' },
-  { id: 'meteofrance_arpege_europe', name: 'ARPEGE', color: '#8c59d9', info: 'Météo-France · maille 11 km · ~4 jours · Europe' },
-  { id: 'icon_seamless', name: 'ICON', color: '#f28c1a', info: 'DWD (Allemagne) · 2 à 13 km · ~7 jours' },
-  { id: 'ecmwf_ifs025', name: 'ECMWF', color: '#1aa666', info: 'Centre européen · 25 km · 7 jours et plus' },
-  { id: 'gfs_seamless', name: 'GFS', color: '#d9404d', info: 'NOAA (USA) · 13 à 25 km · 7 jours et plus' },
+  { id: 'meteofrance_arome_france_hd', name: 'AROME HD', short: 'AR. HD', color: '#0073d9', info: 'Météo-France · maille 1,5 km · ~2 jours · France' },
+  { id: 'meteofrance_arome_france', name: 'AROME', short: 'AROME', color: '#4db3f2', info: 'Météo-France · maille 2,5 km · ~2 jours · France' },
+  { id: 'meteofrance_arpege_europe', name: 'ARPEGE', short: 'ARPÈGE', color: '#8c59d9', info: 'Météo-France · maille 11 km · ~4 jours · Europe' },
+  { id: 'icon_seamless', name: 'ICON', short: 'ICON', color: '#f28c1a', info: 'DWD (Allemagne) · 2 à 13 km · ~7 jours' },
+  { id: 'ecmwf_ifs025', name: 'ECMWF', short: 'ECMWF', color: '#1aa666', info: 'Centre européen · 25 km · 7 jours et plus' },
+  { id: 'gfs_seamless', name: 'GFS', short: 'GFS', color: '#d9404d', info: 'NOAA (USA) · 13 à 25 km · 7 jours et plus' },
 ];
 const FALLBACK_MODEL = 'ecmwf_ifs025';
 const modelById = id => MODELS.find(m => m.id === id) || MODELS[0];
@@ -25,6 +25,12 @@ const store = {
   set spots(value) {
     try { localStorage.setItem('spots.v1', JSON.stringify(value)); } catch { /* stockage indisponible */ }
     scheduleSpotSync();
+  },
+  get view() {
+    try { return localStorage.getItem('view') === 'detail' ? 'detail' : 'compare'; } catch { return 'compare'; }
+  },
+  set view(v) {
+    try { localStorage.setItem('view', v); } catch { /* ignore */ }
   },
   get alertCode() {
     try { return localStorage.getItem('alertCode') || ''; } catch { return ''; }
@@ -486,8 +492,10 @@ async function renderDetail(id) {
   });
 
   view.innerHTML = `
-    <div class="chips" id="chips"></div>
-    <p class="model-info" id="minfo"></p>
+    <div class="seg" id="seg">
+      <button data-view="compare">Comparer les modèles</button>
+      <button data-view="detail">Détail par modèle</button>
+    </div>
     <div id="body"><div class="loading"><span class="spinner"></span> Chargement des modèles…</div></div>`;
 
   let forecast;
@@ -501,172 +509,151 @@ async function renderDetail(id) {
   }
   if (token !== renderToken) return;
 
+  const footer = `<p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · mises à jour à ${new Date(forecast.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>`;
+
   const draw = () => {
-    const selected = store.model;
-    const model = modelById(selected);
-
-    $('#chips').innerHTML = MODELS.map(m => {
-      const on = m.id === selected;
-      return `<button class="chip${on ? ' on' : ''}${hasData(forecast, m.id) ? '' : ' off'}" data-model="${m.id}" style="${on ? `background:${m.color}` : ''}">${m.name}</button>`;
-    }).join('');
-    $('#chips').querySelectorAll('.chip').forEach(btn => {
-      btn.onclick = () => { store.model = btn.dataset.model; draw(); };
+    const mode = store.view;
+    $('#seg').querySelectorAll('button').forEach(btn => {
+      btn.classList.toggle('on', btn.dataset.view === mode);
+      btn.onclick = () => { store.view = btn.dataset.view; draw(); };
     });
-    $('#minfo').textContent = model.info;
-
-    const since = Date.now() / 1000 - 3600;
-    const points = (forecast.series[selected] || []).filter(p => p.time >= since);
-
-    // Tableau heure par heure, groupé par jour
-    const days = [];
-    for (const p of points) {
-      const key = dayKey(p.time, forecast.tz);
-      if (!days.length || days[days.length - 1].key !== key) days.push({ key, time: p.time, points: [] });
-      days[days.length - 1].points.push(p);
+    $('#body').innerHTML = (mode === 'detail' ? detailView(forecast, draw) : compareView(forecast)) + footer;
+    // Toucher ✓ ~ ! affiche l'écart entre les modèles à cette heure.
+    $('#body').onclick = e => {
+      const sign = e.target.closest('.agree[data-label]');
+      if (sign && sign.dataset.label) alert(sign.dataset.label);
+    };
+    if (mode === 'detail') {
+      $('#chips').querySelectorAll('.chip').forEach(btn => {
+        btn.onclick = () => { store.model = btn.dataset.model; draw(); };
+      });
+      const current = $('#chips .chip.on');
+      if (current) $('#chips').scrollLeft = current.offsetLeft - ($('#chips').clientWidth - current.offsetWidth) / 2;
     }
-
-    const table = days.length ? days.map(day => `
-      <section class="day">
-        <h3>${dayTitle(day.time, forecast.tz)}</h3>
-        <div class="table">
-          <div class="thead"><span>Heure</span><span>Dir.</span><span class="c">Vent</span><span class="c">Raf.</span><span class="r">Houle</span><span class="r">T°</span><span></span></div>
-          ${day.points.map(p => {
-            const wave = forecast.waves[p.time];
-            return `
-              <div class="trow">
-                <span>${String(hourOf(p.time, forecast.tz)).padStart(2, '0')}h</span>
-                <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
-                <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
-                <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
-                <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
-                <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>
-                <span class="rain">${p.rain >= 0.2 ? '💧' : ''}</span>
-              </div>`;
-          }).join('')}
-        </div>
-      </section>`).join('')
-      : `<div class="card error"><p><b>Pas de données ${esc(model.name)}</b></p><p>Ce modèle ne couvre pas ce spot. AROME et AROME HD ne couvrent que la France et ses abords.</p></div>`;
-
-    const available = MODELS.filter(m => hasData(forecast, m.id));
-    $('#body').innerHTML = `
-      <div class="card">
-        <div class="card-title">Comparaison des modèles · vent en nœuds</div>
-        <div class="chart-scroll"><div class="chart-box"><canvas id="chart"></canvas></div></div>
-        <div class="legend">
-          ${available.map(m => `<span style="${m.id === selected ? 'font-weight:700' : ''}"><i style="background:${m.color}"></i>${m.name}</span>`).join('')}
-          <span><i class="dash" style="border-color:${model.color}"></i>Rafales ${esc(model.name)}</span>
-        </div>
-      </div>
-      ${table}
-      <p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · mises à jour à ${new Date(forecast.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>`;
-
-    drawChart(forecast, selected, available);
   };
 
   draw();
 }
 
-let chart = null;
-
-function drawChart(forecast, selected, available) {
-  if (chart) { chart.destroy(); chart = null; }
-  if (!window.Chart || !available.length) { $('.chart-scroll').innerHTML = '<p class="muted">Graphique indisponible.</p>'; return; }
-
-  const start = (Date.now() / 1000 - 3600) * 1000;
-  let end = start;
-  const datasets = [];
-  const push = (points, extra) => {
-    const data = points.filter(p => p.time * 1000 >= start).map(p => ({ x: p.time * 1000, y: extra.gusts ? p.gusts : p.speed })).filter(d => d.y != null);
-    if (data.length) end = Math.max(end, data[data.length - 1].x);
-    datasets.push({ data, pointRadius: 0, pointHitRadius: 6, tension: 0.35, fill: false, ...extra.style });
-  };
-  for (const m of available) {
-    const on = m.id === selected;
-    push(forecast.series[m.id], { style: { label: m.name, borderColor: on ? m.color : m.color + '8c', borderWidth: on ? 3 : 1.5, order: on ? 0 : 2 } });
+// Regroupe des instants (unix) par jour, dans le fuseau du spot.
+function groupByDay(times, tz) {
+  const days = [];
+  for (const t of times) {
+    const key = dayKey(t, tz);
+    if (!days.length || days[days.length - 1].key !== key) days.push({ key, time: t, times: [] });
+    days[days.length - 1].times.push(t);
   }
-  const sel = modelById(selected);
-  if (hasData(forecast, selected)) {
-    push(forecast.series[selected], { gusts: true, style: { label: `Rafales ${sel.name}`, borderColor: sel.color, borderWidth: 1.5, borderDash: [4, 3], order: 1 } });
-  }
+  return days;
+}
 
-  // 48 h visibles, défilement horizontal pour la suite
-  const scroll = $('.chart-scroll');
-  const box = $('.chart-box');
-  const hours = (end - start) / 3600e3;
-  box.style.width = Math.max(scroll.clientWidth, (hours * scroll.clientWidth) / 48) + 'px';
+// Accord entre modèles : dispersion (écart type) du vent moyen prévu à une même heure.
+function agreement(speeds) {
+  if (speeds.length < 2) return { sign: '', cls: '', label: '' };
+  const mean = speeds.reduce((a, b) => a + b, 0) / speeds.length;
+  const sd = Math.sqrt(speeds.reduce((a, v) => a + (v - mean) ** 2, 0) / speeds.length);
+  const range = `${Math.round(Math.min(...speeds))} à ${Math.round(Math.max(...speeds))} nœuds selon les modèles`;
+  if (sd <= 3) return { sign: '✓', cls: 'ok', label: `Modèles d'accord : ${range}` };
+  if (sd <= 5) return { sign: '~', cls: 'mid', label: `Modèles à peu près d'accord : ${range}` };
+  return { sign: '!', cls: 'bad', label: `Modèles en désaccord : ${range}` };
+}
 
-  const css = getComputedStyle(document.documentElement);
-  const muted = css.getPropertyValue('--muted').trim();
-  const line = css.getPropertyValue('--line').trim();
+const FIRST_HOUR = 6;
+const LAST_HOUR = 22;
+
+function compareView(forecast) {
   const tz = forecast.tz;
+  const models = MODELS.filter(m => hasData(forecast, m.id));
+  if (!models.length) return '<div class="card error">Aucune prévision disponible pour ce spot.</div>';
 
-  const nowLine = {
-    id: 'now',
-    afterDatasetsDraw(c) {
-      const x = c.scales.x.getPixelForValue(Date.now());
-      const { top, bottom } = c.chartArea;
-      const ctx = c.ctx;
-      ctx.save();
-      ctx.strokeStyle = muted;
-      ctx.setLineDash([2, 2]);
-      ctx.beginPath();
-      ctx.moveTo(x, top);
-      ctx.lineTo(x, bottom);
-      ctx.stroke();
-      ctx.restore();
-    },
-  };
+  const byTime = models.map(m => new Map(forecast.series[m.id].map(p => [p.time, p])));
+  const since = Date.now() / 1000 - 3600;
+  const times = [...new Set(models.flatMap(m => forecast.series[m.id].map(p => p.time)))]
+    .filter(t => t >= since)
+    .filter(t => { const h = hourOf(t, tz); return h >= FIRST_HOUR && h <= LAST_HOUR; })
+    .sort((a, b) => a - b);
 
-  chart = new Chart($('#chart'), {
-    type: 'line',
-    data: { datasets },
-    plugins: [nowLine],
-    options: {
-      responsive: true,
-      maintainAspectRatio: false,
-      animation: false,
-      interaction: { mode: 'nearest', axis: 'x', intersect: false },
-      plugins: {
-        legend: { display: false },
-        tooltip: {
-          callbacks: {
-            title: items => {
-              const t = items[0].parsed.x / 1000;
-              return `${dayTitle(t, tz)} · ${String(hourOf(t, tz)).padStart(2, '0')}h`;
-            },
-            label: item => `${item.dataset.label} : ${Math.round(item.parsed.y)} kn`,
-          },
-        },
-      },
-      scales: {
-        x: {
-          type: 'linear',
-          min: start,
-          max: end,
-          grid: { color: line },
-          ticks: {
-            color: muted,
-            maxRotation: 0,
-            autoSkip: false,
-            callback: v => {
-              const h = hourOf(v / 1000, tz);
-              return h === 0 ? fmt(tz, { weekday: 'short' }).format(v) : `${h}h`;
-            },
-          },
-          // Graduations toutes les 6 h en heure locale du spot
-          afterBuildTicks: axis => {
-            const ticks = [];
-            for (let t = Math.ceil(start / 3600e3) * 3600e3; t <= end; t += 3600e3) {
-              if (hourOf(t / 1000, tz) % 6 === 0) ticks.push({ value: t });
-            }
-            axis.ticks = ticks;
-          },
-        },
-        y: { beginAtZero: true, grid: { color: line }, ticks: { color: muted } },
-      },
-    },
-  });
-  cleanup.push(() => { if (chart) { chart.destroy(); chart = null; } });
+  const cols = `grid-template-columns:34px repeat(${models.length}, minmax(0, 1fr)) 18px`;
+  const header = `
+    <div class="chead" style="${cols}">
+      <span></span>
+      ${models.map(m => `<span style="color:${m.color}">${m.short}</span>`).join('')}
+      <span title="Accord des modèles">⚖︎</span>
+    </div>`;
+
+  const days = groupByDay(times, tz).map(day => `
+    <section class="day">
+      <h3>${dayTitle(day.time, tz)}</h3>
+      <div class="ctable">
+        ${header}
+        ${day.times.map(t => {
+          const points = byTime.map(map => map.get(t));
+          const acc = agreement(points.filter(Boolean).map(p => p.speed));
+          return `
+            <div class="crow" style="${cols}">
+              <span class="h">${String(hourOf(t, tz)).padStart(2, '0')}h</span>
+              ${points.map(p => p
+                ? `<span class="cell" style="background:${windColor(p.speed)};color:${windText(p.speed)}">
+                     <span class="top">${arrow(p.dir)}${Math.round(p.speed)}</span>
+                     <small>${p.gusts != null ? Math.round(p.gusts) : ''}</small>
+                   </span>`
+                : '<span class="cell none">–</span>').join('')}
+              <span class="agree ${acc.cls}" role="button" data-label="${esc(acc.label)}" aria-label="${esc(acc.label)}">${acc.sign}</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </section>`).join('');
+
+  return `
+    <details class="card howto">
+      <summary>Comment lire ce tableau ?</summary>
+      <p>Chaque <b>colonne</b> est un modèle météo, chaque <b>ligne</b> une heure (de ${FIRST_HOUR} h à ${LAST_HOUR} h).</p>
+      <p>Dans chaque case : la <b>flèche</b> montre où va le vent, le <b>gros chiffre</b> est le vent moyen et le <b>petit chiffre</b> les rafales, en nœuds. La couleur suit la force du vent.</p>
+      <p>Colonne ⚖︎ : <span class="agree ok">✓</span> les modèles donnent des valeurs proches, <span class="agree mid">~</span> à peu près, <span class="agree bad">!</span> ils sont en désaccord : prévision incertaine. Touche le signe pour voir l'écart.</p>
+      <p>AROME HD et AROME (Météo-France) sont les plus précis près des côtes françaises mais ne voient qu'à 2 jours. Au-delà, fie-toi à ARPEGE, ICON, ECMWF et GFS.</p>
+    </details>
+    ${days}`;
+}
+
+function detailView(forecast) {
+  const selected = store.model;
+  const model = modelById(selected);
+  const tz = forecast.tz;
+  const chips = MODELS.map(m => {
+    const on = m.id === selected;
+    return `<button class="chip${on ? ' on' : ''}${hasData(forecast, m.id) ? '' : ' off'}" data-model="${m.id}" style="${on ? `background:${m.color}` : ''}">${m.name}</button>`;
+  }).join('');
+
+  const since = Date.now() / 1000 - 3600;
+  const points = new Map((forecast.series[selected] || []).filter(p => p.time >= since).map(p => [p.time, p]));
+  const days = groupByDay([...points.keys()], tz);
+
+  const table = days.length ? days.map(day => `
+    <section class="day">
+      <h3>${dayTitle(day.time, tz)}</h3>
+      <div class="table">
+        <div class="thead"><span>Heure</span><span>Dir.</span><span class="c">Vent</span><span class="c">Raf.</span><span class="r">Houle</span><span class="r">T°</span><span></span></div>
+        ${day.times.map(t => {
+          const p = points.get(t);
+          const wave = forecast.waves[p.time];
+          return `
+            <div class="trow">
+              <span>${String(hourOf(p.time, tz)).padStart(2, '0')}h</span>
+              <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
+              <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
+              <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
+              <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
+              <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>
+              <span class="rain">${p.rain >= 0.2 ? '💧' : ''}</span>
+            </div>`;
+        }).join('')}
+      </div>
+    </section>`).join('')
+    : `<div class="card error"><p><b>Pas de données ${esc(model.name)}</b></p><p>Ce modèle ne couvre pas ce spot. AROME et AROME HD ne couvrent que la France et ses abords.</p></div>`;
+
+  return `
+    <div class="chips" id="chips">${chips}</div>
+    <p class="model-info">${esc(model.info)}</p>
+    ${table}`;
 }
 
 // ---------- Démarrage ----------

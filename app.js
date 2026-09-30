@@ -257,7 +257,11 @@ function renderList() {
         return `
           <li class="row" data-id="${esc(s.id)}">
             ${editing ? '<button class="del" data-act="del" aria-label="Supprimer">−</button>' : ''}
-            ${editing ? `<div class="row-main">${inner}</div>` : `<a class="row-main" href="#/spot/${encodeURIComponent(s.id)}">${inner}</a>`}
+            ${editing
+              ? `<button class="row-main rename" data-act="rename" aria-label="Renommer ${esc(s.name)}">
+                   <div><div class="name">${esc(s.name)} <span class="pencil">✏️</span></div><div class="sub">Touche pour renommer</div></div>
+                 </button>`
+              : `<a class="row-main" href="#/spot/${encodeURIComponent(s.id)}">${inner}</a>`}
             ${editing ? `
               <button class="mv" data-act="up" aria-label="Monter" ${i === 0 ? 'disabled' : ''}>↑</button>
               <button class="mv" data-act="down" aria-label="Descendre" ${i === spots.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
@@ -276,6 +280,10 @@ function renderList() {
       if (btn.dataset.act === 'del') {
         if (!confirm(`Supprimer « ${list[i].name} » ?`)) return;
         list.splice(i, 1);
+      } else if (btn.dataset.act === 'rename') {
+        const name = (prompt('Nouveau nom du spot', list[i].name) || '').trim().slice(0, 60);
+        if (!name || name === list[i].name) return;
+        list[i].name = name;
       } else {
         const j = btn.dataset.act === 'up' ? i - 1 : i + 1;
         [list[i], list[j]] = [list[j], list[i]];

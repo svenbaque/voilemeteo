@@ -295,3 +295,14 @@ input[type="search"], .field input {
 .chevron { color: var(--muted); font-size: 22px; }
 .card p { margin: 0 0 10px; }
 .card .btn { margin: 10px 0 8px; }
+
+/* Renommer un spot en mode Modifier */
+.rename {
+  border: 0;
+  background: none;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.pencil { font-size: 13px; }

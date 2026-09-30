@@ -464,7 +464,7 @@ function alertsLink() {
   return `
     <ul class="list alerts-link">
       <li class="row"><a class="row-main" href="#/alertes">
-        <div><div class="name">🔔 Alertes vent</div><div class="sub">${on ? 'Activées pour tous tes spots' : 'Être prévenu la veille quand il y a du vent'}</div></div>
+        <div><div class="name">🔔 Notifications</div><div class="sub">${on ? 'Activées pour tous tes spots' : 'Être prévenu la veille quand il y a du vent'}</div></div>
         <span class="chevron">›</span>
       </a></li>
     </ul>`;
@@ -588,6 +588,28 @@ function applyTheme() {
   else document.documentElement.dataset.theme = t;
 }
 
+const APP_URL = 'https://svenbaque.github.io/voilemeteo/';
+
+// Ouvre le menu de partage de l'iPhone (Messages, WhatsApp…), ou copie le lien à défaut.
+async function shareApp() {
+  const data = {
+    title: 'VoileMétéo',
+    text: 'VoileMétéo : le vent heure par heure sur tes spots de voile (AROME, ECMWF…). Ouvre le lien dans Safari puis Partager → Sur l\'écran d\'accueil.',
+    url: APP_URL,
+  };
+  const status = $('#share-status');
+  if (navigator.share) {
+    try { await navigator.share(data); } catch { /* partage annulé */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(`${data.text}\n${APP_URL}`);
+    if (status) status.textContent = '✅ Lien copié : colle-le dans un message';
+  } catch {
+    if (status) status.textContent = APP_URL;
+  }
+}
+
 function renderSettings() {
   teardown();
   setHeader({ title: 'Paramètres', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
@@ -606,6 +628,12 @@ function renderSettings() {
 
     view.innerHTML = `
       ${alertsLink()}
+      <ul class="list alerts-link">
+        <li class="row"><button class="row-main rename" id="share">
+          <div><div class="name">📤 Partager l'app</div><div class="sub" id="share-status">Envoyer le lien par message à un ami</div></div>
+          <span class="chevron">›</span>
+        </button></li>
+      </ul>
       <div class="card">
         <div class="card-title">Modèle météo de référence</div>
         <ul class="settings-list">
@@ -631,6 +659,7 @@ function renderSettings() {
     view.querySelectorAll('[data-model]').forEach(btn => {
       btn.onclick = () => { store.model = btn.dataset.model; draw(); };
     });
+    $('#share').onclick = shareApp;
     $('#theme-auto').onchange = e => {
       // En désactivant « Automatique », on garde l'apparence actuelle.
       store.theme = e.target.checked ? 'auto' : (isDark ? 'dark' : 'light');
@@ -650,7 +679,7 @@ function renderSettings() {
 
 function renderAlerts() {
   teardown();
-  setHeader({ title: 'Alertes vent', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
+  setHeader({ title: 'Notifications', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
 
   const spots = store.spots;
   const supported = pushSupported();
@@ -660,7 +689,7 @@ function renderAlerts() {
   const on = store.pushOn && supported && Notification.permission === 'granted';
 
   let warning = '';
-  if (!standalone) warning = "Pour recevoir les alertes, ouvre VoileMétéo depuis son icône sur l'écran d'accueil (dans Safari : Partager → Sur l'écran d'accueil).";
+  if (!standalone) warning = "Pour recevoir les notifications, ouvre VoileMétéo depuis son icône sur l'écran d'accueil (dans Safari : Partager → Sur l'écran d'accueil).";
   else if (!supported) warning = 'Ton téléphone ne permet pas encore les notifications des web apps (il faut iOS 16.4 ou plus récent).';
   else if (denied) warning = 'Les notifications sont bloquées : autorise-les dans Réglages de l\'iPhone → Notifications → VoileMétéo.';
 
@@ -668,7 +697,7 @@ function renderAlerts() {
     <div class="card">
       <p>Chaque soir à 18 h, tu reçois une notification si demain il y a entre <b>15 et 30 nœuds</b> pendant la journée sur un de tes spots.</p>
       <label class="switch-row${usable ? '' : ' disabled'}">
-        <span class="txt"><span>Recevoir les alertes</span></span>
+        <span class="txt"><span>Recevoir les notifications</span></span>
         <input type="checkbox" class="switch" id="push-toggle" ${on ? 'checked' : ''} ${usable ? '' : 'disabled'}>
       </label>
       <p id="status" class="muted">${esc(warning)}</p>
@@ -682,11 +711,11 @@ function renderAlerts() {
   const status = $('#status');
   const showStatus = () => {
     if (warning) return;
-    if (!store.pushOn) { status.textContent = 'Alertes désactivées.'; return; }
+    if (!store.pushOn) { status.textContent = 'Notifications désactivées.'; return; }
     const last = store.lastSync;
     status.textContent = last
-      ? `✅ Alertes activées · mises à jour à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Elles commencent dans les 3 heures.`
-      : '⏳ Alertes activées, en attente d\'envoi (réseau ?).';
+      ? `✅ Notifications activées · mises à jour à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Elles commencent dans les 3 heures.`
+      : '⏳ Notifications activées, en attente d\'envoi (réseau ?).';
   };
   showStatus();
 

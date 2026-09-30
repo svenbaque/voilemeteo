@@ -548,13 +548,13 @@ function groupByDay(times, tz) {
 
 // Accord entre modèles : dispersion (écart type) du vent moyen prévu à une même heure.
 function agreement(speeds) {
-  if (speeds.length < 2) return { sign: '', cls: '', label: '' };
+  if (speeds.length < 2) return { sign: '', emoji: '', cls: '', label: '' };
   const mean = speeds.reduce((a, b) => a + b, 0) / speeds.length;
   const sd = Math.sqrt(speeds.reduce((a, v) => a + (v - mean) ** 2, 0) / speeds.length);
   const range = `${Math.round(Math.min(...speeds))} à ${Math.round(Math.max(...speeds))} nœuds selon les modèles`;
-  if (sd <= 3) return { sign: '✓', cls: 'ok', label: `Modèles d'accord : ${range}` };
-  if (sd <= 5) return { sign: '~', cls: 'mid', label: `Modèles à peu près d'accord : ${range}` };
-  return { sign: '!', cls: 'bad', label: `Modèles en désaccord : ${range}` };
+  if (sd <= 3) return { sign: '✓', emoji: '🟢', cls: 'ok', label: `Fiable, modèles d'accord : ${range}` };
+  if (sd <= 5) return { sign: '~', emoji: '🟠', cls: 'mid', label: `Moyennement fiable, modèles à peu près d'accord : ${range}` };
+  return { sign: '!', emoji: '🔴', cls: 'bad', label: `Peu fiable, modèles en désaccord : ${range}` };
 }
 
 const FIRST_HOUR = 6;
@@ -626,21 +626,30 @@ function detailView(forecast) {
   const since = Date.now() / 1000 - 3600;
   const points = new Map((forecast.series[selected] || []).filter(p => p.time >= since).map(p => [p.time, p]));
   const days = groupByDay([...points.keys()], tz);
+  const allSpeeds = new Map();
+  for (const m of MODELS) {
+    for (const p of forecast.series[m.id] || []) {
+      if (!allSpeeds.has(p.time)) allSpeeds.set(p.time, []);
+      allSpeeds.get(p.time).push(p.speed);
+    }
+  }
 
   const table = days.length ? days.map(day => `
     <section class="day">
       <h3>${dayTitle(day.time, tz)}</h3>
       <div class="table">
-        <div class="thead"><span>Heure</span><span>Dir.</span><span class="c">Vent</span><span class="c">Raf.</span><span class="r">Houle</span><span class="r">T°</span><span></span></div>
+        <div class="thead"><span>Heure</span><span>Dir.</span><span class="c">Vent</span><span class="c">Raf.</span><span class="c">Fiab.</span><span class="r">Houle</span><span class="r">T°</span><span></span></div>
         ${day.times.map(t => {
           const p = points.get(t);
           const wave = forecast.waves[p.time];
+          const acc = agreement(allSpeeds.get(t) || []);
           return `
             <div class="trow">
               <span>${String(hourOf(p.time, tz)).padStart(2, '0')}h</span>
               <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
               <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
               <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
+              <span class="agree fiab" role="button" data-label="${esc(acc.label)}" aria-label="${esc(acc.label)}">${acc.emoji}</span>
               <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
               <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>
               <span class="rain">${p.rain >= 0.2 ? '💧' : ''}</span>
@@ -653,6 +662,7 @@ function detailView(forecast) {
   return `
     <div class="chips" id="chips">${chips}</div>
     <p class="model-info">${esc(model.info)}</p>
+    <p class="model-info">Fiabilité (comparaison de tous les modèles) : 🟢 d'accord · 🟠 à peu près · 🔴 en désaccord. Touche l'émoji pour voir l'écart.</p>
     ${table}`;
 }
 

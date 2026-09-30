@@ -268,8 +268,8 @@ input[type="search"], .field input {
 .table { background: var(--card); border-radius: 12px; padding: 2px 10px; }
 .thead, .trow {
   display: grid;
-  grid-template-columns: 38px 62px 42px 42px 1fr 34px 16px;
-  gap: 6px;
+  grid-template-columns: 36px 56px 40px 40px 26px 1fr 32px 14px;
+  gap: 5px;
   align-items: center;
 }
 .thead {
@@ -356,3 +356,5 @@ input[type="search"], .field input {
 .howto summary { font-weight: 600; cursor: pointer; }
 .howto p { font-size: 14px; margin: 8px 0 0; }
 .agree[data-label] { cursor: pointer; }
+
+.agree.fiab { font-size: 13px; }

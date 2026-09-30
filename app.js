@@ -293,6 +293,7 @@ function route() {
   else if (path === '/add') renderAdd();
   else if (path === '/alertes') renderAlerts();
   else if (path === '/reglages') renderSettings();
+  else if (path === '/reglages/modele') renderModelSetting();
   else renderList();
 }
 window.addEventListener('hashchange', route);
@@ -646,6 +647,31 @@ async function shareApp() {
   }
 }
 
+function renderModelSetting() {
+  teardown();
+  setHeader({ title: 'Modèle favori', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
+
+  const draw = () => {
+    const selected = store.model;
+    view.innerHTML = `
+      <div class="card">
+        <ul class="settings-list">
+          ${MODELS.map(m => `
+            <li><button class="option" data-model="${m.id}">
+              <span class="dot" style="background:${m.color}"></span>
+              <span class="txt"><span>${esc(m.name)}</span><span class="sub muted">${esc(m.info)}</span></span>
+              <span class="check">${m.id === selected ? '✓' : ''}</span>
+            </button></li>`).join('')}
+        </ul>
+      </div>
+      <p class="muted" style="margin: 0 4px">Utilisé pour le vent affiché dans ta liste de spots et ouvert en premier dans le détail d'un spot. S'il ne couvre pas un spot (AROME hors de France) ou ne voit pas assez loin, un autre modèle prend le relais.</p>`;
+    view.querySelectorAll('[data-model]').forEach(btn => {
+      btn.onclick = () => { store.model = btn.dataset.model; draw(); };
+    });
+  };
+  draw();
+}
+
 function renderSettings() {
   teardown();
   setHeader({ title: 'Paramètres', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
@@ -655,13 +681,6 @@ function renderSettings() {
     const theme = store.theme;
     const systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
     const isDark = theme === 'dark' || (theme === 'auto' && systemDark);
-    const option = (attrs, dot, title, sub, on) => `
-      <li><button class="option" ${attrs}>
-        ${dot ? `<span class="dot" style="background:${dot}"></span>` : ''}
-        <span class="txt"><span>${title}</span>${sub ? `<span class="sub muted">${sub}</span>` : ''}</span>
-        <span class="check">${on ? '✓' : ''}</span>
-      </button></li>`;
-
     view.innerHTML = `
       ${alertsLink()}
       <ul class="list alerts-link">
@@ -670,13 +689,12 @@ function renderSettings() {
           <span class="chevron">›</span>
         </button></li>
       </ul>
-      <div class="card">
-        <div class="card-title">Modèle météo de référence</div>
-        <ul class="settings-list">
-          ${MODELS.map(m => option(`data-model="${m.id}"`, m.color, esc(m.name), esc(m.info), m.id === model)).join('')}
-        </ul>
-        <p class="muted">Utilisé pour le vent affiché dans ta liste de spots et ouvert en premier dans le détail d'un spot. S'il ne couvre pas un spot (AROME hors de France), ECMWF est utilisé à la place.</p>
-      </div>
+      <ul class="list alerts-link">
+        <li class="row"><a class="row-main" href="#/reglages/modele">
+          <div><div class="name">🌬️ Modèle météo favori</div><div class="sub">${esc(modelById(model).name)}</div></div>
+          <span class="chevron">›</span>
+        </a></li>
+      </ul>
       <div class="card">
         <div class="card-title">Apparence</div>
         <ul class="settings-list">
@@ -692,9 +710,6 @@ function renderSettings() {
       </div>
       <p class="foot">Sources des prévisions : <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
 
-    view.querySelectorAll('[data-model]').forEach(btn => {
-      btn.onclick = () => { store.model = btn.dataset.model; draw(); };
-    });
     $('#share').onclick = shareApp;
     $('#theme-auto').onchange = e => {
       // En désactivant « Automatique », on garde l'apparence actuelle.

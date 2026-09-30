@@ -290,9 +290,7 @@ function renderList() {
                    <div><div class="name">${esc(s.name)} <span class="pencil">✏️</span></div><div class="sub">Touche pour renommer</div></div>
                  </button>`
               : `<a class="row-main" href="#/spot/${encodeURIComponent(s.id)}">${inner}</a>`}
-            ${editing ? `
-              <button class="mv" data-act="up" aria-label="Monter" ${i === 0 ? 'disabled' : ''}>↑</button>
-              <button class="mv" data-act="down" aria-label="Descendre" ${i === spots.length - 1 ? 'disabled' : ''}>↓</button>` : ''}
+            ${editing ? '<span class="grip" aria-label="Faire glisser pour déplacer">≡</span>' : ''}
           </li>`;
       }).join('')}
     </ul>
@@ -312,14 +310,13 @@ function renderList() {
         const name = (prompt('Nouveau nom du spot', list[i].name) || '').trim().slice(0, 60);
         if (!name || name === list[i].name) return;
         list[i].name = name;
-      } else {
-        const j = btn.dataset.act === 'up' ? i - 1 : i + 1;
-        [list[i], list[j]] = [list[j], list[i]];
       }
       store.spots = list;
       renderList();
     };
   });
+
+  if (editing) enableDragSort($('.list', view));
 
   if (!editing) {
     view.querySelectorAll('.row').forEach(row => {
@@ -327,6 +324,58 @@ function renderList() {
       if (spot) loadBadge(spot, row);
     });
   }
+}
+
+// Réorganiser les spots en les faisant glisser par leur poignée ≡ (doigt ou souris).
+function enableDragSort(list) {
+  list.querySelectorAll('.grip').forEach(grip => {
+    grip.addEventListener('pointerdown', e => {
+      e.preventDefault();
+      const row = grip.closest('.row');
+      const rows = [...list.children];
+      const from = rows.indexOf(row);
+      const rects = rows.map(r => r.getBoundingClientRect());
+      const height = rects[from].height;
+      const startY = e.clientY;
+      let to = from;
+
+      grip.setPointerCapture(e.pointerId);
+      row.classList.add('dragging');
+      rows.forEach(r => { if (r !== row) r.classList.add('shifting'); });
+
+      const onMove = ev => {
+        const dy = Math.max(rects[0].top - rects[from].top, Math.min(rects[rects.length - 1].top - rects[from].top, ev.clientY - startY));
+        row.style.transform = `translateY(${dy}px)`;
+        const center = rects[from].top + height / 2 + dy;
+        // Nouvelle place = nombre d'autres spots dont le milieu est au-dessus du spot déplacé
+        to = rects.filter((r, k) => k !== from && r.top + r.height / 2 < center).length;
+        rows.forEach((r, k) => {
+          if (k === from) return;
+          let shift = 0;
+          if (from < to && k > from && k <= to) shift = -height;
+          if (from > to && k >= to && k < from) shift = height;
+          r.style.transform = shift ? `translateY(${shift}px)` : '';
+        });
+      };
+
+      const onEnd = () => {
+        grip.removeEventListener('pointermove', onMove);
+        grip.removeEventListener('pointerup', onEnd);
+        grip.removeEventListener('pointercancel', onEnd);
+        if (to !== from) {
+          const spots = store.spots;
+          const [moved] = spots.splice(from, 1);
+          spots.splice(to, 0, moved);
+          store.spots = spots;
+        }
+        renderList();
+      };
+
+      grip.addEventListener('pointermove', onMove);
+      grip.addEventListener('pointerup', onEnd);
+      grip.addEventListener('pointercancel', onEnd);
+    });
+  });
 }
 
 function alertsLink() {
@@ -465,6 +514,8 @@ function renderSettings() {
   const draw = () => {
     const model = store.model;
     const theme = store.theme;
+    const systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = theme === 'dark' || (theme === 'auto' && systemDark);
     const option = (attrs, dot, title, sub, on) => `
       <li><button class="option" ${attrs}>
         ${dot ? `<span class="dot" style="background:${dot}"></span>` : ''}
@@ -483,9 +534,14 @@ function renderSettings() {
       <div class="card">
         <div class="card-title">Apparence</div>
         <ul class="settings-list">
-          ${option('data-theme="auto"', '', 'Automatique', 'Suit le réglage de ton iPhone', theme === 'auto')}
-          ${option('data-theme="light"', '', 'Clair', '', theme === 'light')}
-          ${option('data-theme="dark"', '', 'Sombre', '', theme === 'dark')}
+          <li><label class="switch-row">
+            <span class="txt"><span>Automatique</span><span class="sub muted">Suit le réglage clair / sombre de ton iPhone</span></span>
+            <input type="checkbox" class="switch" id="theme-auto" ${theme === 'auto' ? 'checked' : ''}>
+          </label></li>
+          <li><label class="switch-row${theme === 'auto' ? ' disabled' : ''}">
+            <span class="txt"><span>Mode sombre</span></span>
+            <input type="checkbox" class="switch" id="theme-dark" ${isDark ? 'checked' : ''} ${theme === 'auto' ? 'disabled' : ''}>
+          </label></li>
         </ul>
       </div>
       <p class="foot">VoileMétéo · données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
@@ -493,9 +549,17 @@ function renderSettings() {
     view.querySelectorAll('[data-model]').forEach(btn => {
       btn.onclick = () => { store.model = btn.dataset.model; draw(); };
     });
-    view.querySelectorAll('[data-theme]').forEach(btn => {
-      btn.onclick = () => { store.theme = btn.dataset.theme; applyTheme(); draw(); };
-    });
+    $('#theme-auto').onchange = e => {
+      // En désactivant « Automatique », on garde l'apparence actuelle.
+      store.theme = e.target.checked ? 'auto' : (isDark ? 'dark' : 'light');
+      applyTheme();
+      draw();
+    };
+    $('#theme-dark').onchange = e => {
+      store.theme = e.target.checked ? 'dark' : 'light';
+      applyTheme();
+      draw();
+    };
   };
   draw();
 }

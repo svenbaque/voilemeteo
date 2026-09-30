@@ -1,5 +1,5 @@
 // Service worker : garde l'app et les dernières prévisions pour un usage hors connexion (en mer !).
-const SHELL_CACHE = 'voilemeteo-shell-v8';
+const SHELL_CACHE = 'voilemeteo-shell-v9';
 const DATA_CACHE = 'voilemeteo-data-v1';
 const SHELL = [
   './',

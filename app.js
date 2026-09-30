@@ -33,7 +33,8 @@ const store = {
     try { localStorage.setItem('view.v2', v); } catch { /* ignore */ }
   },
   get theme() {
-    try { const t = localStorage.getItem('theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch { return 'auto'; }
+    // Mode sombre par défaut tant que l'utilisateur n'a rien choisi
+    try { const t = localStorage.getItem('theme') || 'dark'; return t === 'light' || t === 'auto' ? t : 'dark'; } catch { return 'dark'; }
   },
   set theme(t) {
     try { localStorage.setItem('theme', t); } catch { /* ignore */ }
@@ -167,19 +168,6 @@ function windColor(kn) {
 }
 const windText = kn => (kn >= 25 ? '#fff' : '#000');
 
-// Rafales : même échelle que le vent moyen, en couleurs vives.
-function gustColor(kn) {
-  if (kn < 5) return '#1e6fd9';
-  if (kn < 10) return '#0096c7';
-  if (kn < 15) return '#1faa4a';
-  if (kn < 20) return '#f2c200';
-  if (kn < 25) return '#f57c00';
-  if (kn < 30) return '#e02424';
-  if (kn < 35) return '#c2185b';
-  if (kn < 40) return '#8e24aa';
-  return '#4a148c';
-}
-const gustText = kn => (kn >= 15 && kn < 25 ? '#000' : '#fff');
 
 function cardinal(deg) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
@@ -271,8 +259,7 @@ function renderList() {
         <h2>Aucun spot</h2>
         <p>Ajoute tes spots de navigation préférés pour suivre le vent heure par heure.</p>
         <a class="btn" href="#/add">Ajouter un spot</a>
-      </div>
-      ${alertsLink()}`;
+      </div>`;
     return;
   }
 
@@ -294,7 +281,6 @@ function renderList() {
           </li>`;
       }).join('')}
     </ul>
-    ${alertsLink()}
     <p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Météo-France, DWD, ECMWF, NOAA</p>`;
 
   view.querySelectorAll('[data-act]').forEach(btn => {
@@ -524,6 +510,7 @@ function renderSettings() {
       </button></li>`;
 
     view.innerHTML = `
+      ${alertsLink()}
       <div class="card">
         <div class="card-title">Modèle météo de référence</div>
         <ul class="settings-list">
@@ -568,7 +555,7 @@ function renderSettings() {
 
 function renderAlerts() {
   teardown();
-  setHeader({ title: 'Alertes vent', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
+  setHeader({ title: 'Alertes vent', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
 
   const spots = store.spots;
   view.innerHTML = `
@@ -784,7 +771,7 @@ function detailView(forecast) {
               <span>${String(hourOf(p.time, tz)).padStart(2, '0')}h</span>
               <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
               <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
-              <span class="gust" style="${p.gusts != null ? `background:${gustColor(p.gusts)};color:${gustText(p.gusts)}` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
+              <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
               <span class="agree fiab" role="button" data-label="${esc(acc.label)}" aria-label="${esc(acc.label)}">${acc.emoji}</span>
               <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
               <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>

@@ -297,6 +297,7 @@ function route() {
   else if (path === '/alertes') renderAlerts();
   else if (path === '/reglages') renderSettings();
   else if (path === '/reglages/modele') renderModelSetting();
+  else if (path === '/reglages/apparence') renderAppearanceSetting();
   else renderList();
 }
 window.addEventListener('hashchange', route);
@@ -675,6 +676,42 @@ function renderModelSetting() {
   draw();
 }
 
+function renderAppearanceSetting() {
+  teardown();
+  setHeader({ title: 'Apparence', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
+
+  const draw = () => {
+    const theme = store.theme;
+    const systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
+    const isDark = theme === 'dark' || (theme === 'auto' && systemDark);
+    view.innerHTML = `
+      <div class="card">
+        <ul class="settings-list">
+          <li><label class="switch-row">
+            <span class="txt"><span>Automatique</span><span class="sub muted">Suit le réglage clair / sombre de ton iPhone</span></span>
+            <input type="checkbox" class="switch" id="theme-auto" ${theme === 'auto' ? 'checked' : ''}>
+          </label></li>
+          <li><label class="switch-row${theme === 'auto' ? ' disabled' : ''}">
+            <span class="txt"><span>Mode sombre</span></span>
+            <input type="checkbox" class="switch" id="theme-dark" ${isDark ? 'checked' : ''} ${theme === 'auto' ? 'disabled' : ''}>
+          </label></li>
+        </ul>
+      </div>`;
+    $('#theme-auto').onchange = e => {
+      // En désactivant « Automatique », on garde l'apparence actuelle.
+      store.theme = e.target.checked ? 'auto' : (isDark ? 'dark' : 'light');
+      applyTheme();
+      draw();
+    };
+    $('#theme-dark').onchange = e => {
+      store.theme = e.target.checked ? 'dark' : 'light';
+      applyTheme();
+      draw();
+    };
+  };
+  draw();
+}
+
 function renderSettings() {
   teardown();
   setHeader({ title: 'Paramètres', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
@@ -682,8 +719,6 @@ function renderSettings() {
   const draw = () => {
     const model = store.model;
     const theme = store.theme;
-    const systemDark = window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches;
-    const isDark = theme === 'dark' || (theme === 'auto' && systemDark);
     view.innerHTML = `
       ${alertsLink()}
       <ul class="list alerts-link">
@@ -698,33 +733,15 @@ function renderSettings() {
           <span class="chevron">›</span>
         </a></li>
       </ul>
-      <div class="card">
-        <div class="card-title">Apparence</div>
-        <ul class="settings-list">
-          <li><label class="switch-row">
-            <span class="txt"><span>Automatique</span><span class="sub muted">Suit le réglage clair / sombre de ton iPhone</span></span>
-            <input type="checkbox" class="switch" id="theme-auto" ${theme === 'auto' ? 'checked' : ''}>
-          </label></li>
-          <li><label class="switch-row${theme === 'auto' ? ' disabled' : ''}">
-            <span class="txt"><span>Mode sombre</span></span>
-            <input type="checkbox" class="switch" id="theme-dark" ${isDark ? 'checked' : ''} ${theme === 'auto' ? 'disabled' : ''}>
-          </label></li>
-        </ul>
-      </div>
+      <ul class="list alerts-link">
+        <li class="row"><a class="row-main" href="#/reglages/apparence">
+          <div><div class="name">🌓 Apparence</div><div class="sub">${theme === 'auto' ? 'Automatique' : theme === 'dark' ? 'Sombre' : 'Clair'}</div></div>
+          <span class="chevron">›</span>
+        </a></li>
+      </ul>
       <p class="foot">Sources des prévisions : <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
 
     $('#share').onclick = shareApp;
-    $('#theme-auto').onchange = e => {
-      // En désactivant « Automatique », on garde l'apparence actuelle.
-      store.theme = e.target.checked ? 'auto' : (isDark ? 'dark' : 'light');
-      applyTheme();
-      draw();
-    };
-    $('#theme-dark').onchange = e => {
-      store.theme = e.target.checked ? 'dark' : 'light';
-      applyTheme();
-      draw();
-    };
   };
   draw();
 }

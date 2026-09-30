@@ -488,3 +488,41 @@ input[type="search"], .field input {
 
 /* Garde le titre centré même quand le bouton de gauche est absent */
 #left[hidden] { display: block; visibility: hidden; }
+
+/* Raccourcis vers chaque jour (restent visibles en faisant défiler) */
+.daybar {
+  position: sticky;
+  top: var(--bar-h, 52px);
+  z-index: 900;
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  margin: 8px -16px 4px;
+  padding: 8px 16px;
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  -webkit-backdrop-filter: blur(16px);
+  backdrop-filter: blur(16px);
+}
+.daybar::-webkit-scrollbar { display: none; }
+.daybar button {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 99px;
+  padding: 6px 11px;
+  background: var(--card);
+  color: var(--text);
+  font: 600 13px/1 inherit;
+  cursor: pointer;
+}
+.day { scroll-margin-top: calc(var(--bar-h, 52px) + 56px); }
+.relay {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--muted);
+  background: var(--chip);
+  border-radius: 99px;
+  padding: 2px 8px;
+  margin-left: 6px;
+  vertical-align: 2px;
+}

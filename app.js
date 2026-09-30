@@ -162,7 +162,7 @@ async function fetchForecast(spot, models = MODELS.map(m => m.id)) {
   const hit = forecastCache.get(key);
   if (hit && Date.now() - hit.at < 10 * 60 * 1000) return hit.data;
 
-  const common = { latitude: spot.lat, longitude: spot.lon, timeformat: 'unixtime', forecast_days: '7' };
+  const common = { latitude: spot.lat, longitude: spot.lon, timeformat: 'unixtime', forecast_days: '8' };
   const windURL = 'https://api.open-meteo.com/v1/forecast?' + new URLSearchParams({
     ...common,
     hourly: 'wind_speed_10m,wind_gusts_10m,wind_direction_10m,temperature_2m,precipitation',
@@ -274,6 +274,7 @@ function teardown() {
 }
 
 function setHeader({ title, left, extra, right }) {
+  requestAnimationFrame(() => document.documentElement.style.setProperty('--bar-h', $('#bar').offsetHeight + 'px'));
   $('#title').textContent = title;
   for (const [el, cfg] of [[$('#left'), left], [$('#extra'), extra], [$('#right'), right]]) {
     el.hidden = !cfg;
@@ -817,6 +818,7 @@ async function renderDetail(id) {
       btn.onclick = () => { store.view = btn.dataset.view; draw(); };
     });
     $('#body').innerHTML = mode === 'detail' ? detailView(forecast, draw) : compareView(forecast);
+    bindDayBar();
     // Toucher ✓ ~ ! affiche l'écart entre les modèles à cette heure.
     $('#body').onclick = e => {
       const sign = e.target.closest('.agree[data-label]');
@@ -856,6 +858,26 @@ function agreement(speeds) {
   return { sign: '!', emoji: '🔴', cls: 'bad', label: `Peu fiable, modèles en désaccord : ${range}` };
 }
 
+// Raccourcis « Auj. · jeu. 2 · ven. 3… » qui font défiler jusqu'au jour choisi.
+function dayBar(days, tz) {
+  if (days.length < 2) return '';
+  const today = dayKey(Date.now() / 1000, tz);
+  const short = fmt(tz, { weekday: 'short', day: 'numeric' });
+  return `
+    <nav class="daybar" aria-label="Aller au jour">
+      ${days.map((d, i) => `<button data-day="jour-${i}">${d.key === today ? 'Auj.' : esc(short.format(d.time * 1000))}</button>`).join('')}
+    </nav>`;
+}
+
+function bindDayBar() {
+  document.querySelectorAll('.daybar button').forEach(btn => {
+    btn.onclick = () => {
+      const target = document.getElementById(btn.dataset.day);
+      if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+  });
+}
+
 const FIRST_HOUR = 6;
 const LAST_HOUR = 22;
 
@@ -879,8 +901,9 @@ function compareView(forecast) {
       <span title="Accord des modèles">⚖︎</span>
     </div>`;
 
-  const days = groupByDay(times, tz).map(day => `
-    <section class="day">
+  const dayGroups = groupByDay(times, tz);
+  const days = dayGroups.map((day, i) => `
+    <section class="day" id="jour-${i}">
       <h3>${dayTitle(day.time, tz)}</h3>
       <div class="ctable">
         ${header}
@@ -903,6 +926,7 @@ function compareView(forecast) {
     </section>`).join('');
 
   return `
+    ${dayBar(dayGroups, tz)}
     <details class="card howto">
       <summary>Comment lire ce tableau ?</summary>
       <p>Chaque <b>colonne</b> est un modèle météo, chaque <b>ligne</b> une heure (de ${FIRST_HOUR} h à ${LAST_HOUR} h).</p>
@@ -922,8 +946,19 @@ function detailView(forecast) {
     return `<button class="chip${on ? ' on' : ''}${hasData(forecast, m.id) ? '' : ' off'}" data-model="${m.id}" style="${on ? `background:${m.color}` : ''}">${m.name}</button>`;
   }).join('');
 
+  // Quand le modèle choisi ne voit plus assez loin (AROME : 2 jours, ARPEGE : 4 jours),
+  // un autre modèle prend le relais pour avoir toujours la semaine complète.
   const since = Date.now() / 1000 - 3600;
-  const points = new Map((forecast.series[selected] || []).filter(p => p.time >= since).map(p => [p.time, p]));
+  const chain = [selected, 'meteofrance_arpege_europe', 'ecmwf_ifs025', 'icon_seamless', 'gfs_seamless']
+    .filter((id, i, list) => list.indexOf(id) === i);
+  const points = new Map();
+  const source = new Map();
+  let end = since;
+  for (const id of chain) {
+    const extra = (forecast.series[id] || []).filter(p => p.time > end || (points.size === 0 && p.time >= since));
+    for (const p of extra) { points.set(p.time, p); source.set(p.time, id); }
+    if (extra.length) end = extra[extra.length - 1].time;
+  }
   const days = groupByDay([...points.keys()], tz);
   const allSpeeds = new Map();
   for (const m of MODELS) {
@@ -933,9 +968,14 @@ function detailView(forecast) {
     }
   }
 
-  const table = days.length ? days.map(day => `
-    <section class="day">
-      <h3>${dayTitle(day.time, tz)}</h3>
+  const relay = day => {
+    const others = [...new Set(day.times.map(t => source.get(t)))].filter(id => id !== selected);
+    return others.length ? ` <span class="relay">relais ${others.map(id => esc(modelById(id).name)).join(', ')}</span>` : '';
+  };
+
+  const table = days.length ? days.map((day, i) => `
+    <section class="day" id="jour-${i}">
+      <h3>${dayTitle(day.time, tz)}${relay(day)}</h3>
       <div class="table">
         <div class="thead"><span>Heure</span><span>Dir.</span><span class="c">Vent</span><span class="c">Raf.</span><span class="c">Fiab.</span><span class="r">Houle</span><span class="r">T°</span><span></span></div>
         ${day.times.map(t => {
@@ -960,6 +1000,7 @@ function detailView(forecast) {
 
   return `
     <div class="chips" id="chips">${chips}</div>
+    ${dayBar(days, tz)}
     <p class="model-info">${esc(model.info)}</p>
     <p class="model-info">Fiabilité (comparaison de tous les modèles) : 🟢 d'accord · 🟠 à peu près · 🔴 en désaccord. Touche l'émoji pour voir l'écart.</p>
     ${table}`;

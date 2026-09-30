@@ -24,6 +24,19 @@ const store = {
   },
   set spots(value) {
     try { localStorage.setItem('spots.v1', JSON.stringify(value)); } catch { /* stockage indisponible */ }
+    scheduleSpotSync();
+  },
+  get alertCode() {
+    try { return localStorage.getItem('alertCode') || ''; } catch { return ''; }
+  },
+  set alertCode(code) {
+    try { localStorage.setItem('alertCode', code); } catch { /* ignore */ }
+  },
+  get lastSync() {
+    try { return Number(localStorage.getItem('alertSync')) || 0; } catch { return 0; }
+  },
+  set lastSync(time) {
+    try { localStorage.setItem('alertSync', String(time)); } catch { /* ignore */ }
   },
   get model() {
     let id;
@@ -34,6 +47,31 @@ const store = {
     try { localStorage.setItem('model', id); } catch { /* ignore */ }
   },
 };
+
+// ---------- Alertes vent : envoi de la liste des spots ----------
+// Les alertes tournent chaque soir sur GitHub. Pour savoir quels spots surveiller, l'app publie
+// sa liste sur le sujet ntfy privé « <code>-spots » à chaque changement et à chaque ouverture.
+
+const ALERT_CODE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
+let syncTimer = null;
+
+function scheduleSpotSync() {
+  clearTimeout(syncTimer);
+  syncTimer = setTimeout(() => { syncSpots().catch(() => { /* réessai à la prochaine ouverture */ }); }, 1000);
+}
+
+async function syncSpots() {
+  const code = store.alertCode;
+  if (!ALERT_CODE_PATTERN.test(code)) return false;
+  const spots = store.spots.map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
+  const res = await fetch('https://ntfy.sh/', {
+    method: 'POST',
+    body: JSON.stringify({ topic: `${code}-spots`, message: JSON.stringify({ v: 1, spots }) }),
+  });
+  if (!res.ok) throw new Error(`Envoi impossible (${res.status})`);
+  store.lastSync = Date.now();
+  return true;
+}
 
 // ---------- API Open-Meteo ----------
 
@@ -178,6 +216,7 @@ function route() {
   const path = location.hash.slice(1) || '/';
   if (path.startsWith('/spot/')) renderDetail(decodeURIComponent(path.slice(6)));
   else if (path === '/add') renderAdd();
+  else if (path === '/alertes') renderAlerts();
   else renderList();
 }
 window.addEventListener('hashchange', route);
@@ -204,7 +243,8 @@ function renderList() {
         <h2>Aucun spot</h2>
         <p>Ajoute tes spots de navigation préférés pour suivre le vent heure par heure.</p>
         <a class="btn" href="#/add">Ajouter un spot</a>
-      </div>`;
+      </div>
+      ${alertsLink()}`;
     return;
   }
 
@@ -224,6 +264,7 @@ function renderList() {
           </li>`;
       }).join('')}
     </ul>
+    ${alertsLink()}
     <p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Météo-France, DWD, ECMWF, NOAA</p>`;
 
   view.querySelectorAll('[data-act]').forEach(btn => {
@@ -250,6 +291,17 @@ function renderList() {
       if (spot) loadBadge(spot, row);
     });
   }
+}
+
+function alertsLink() {
+  const on = ALERT_CODE_PATTERN.test(store.alertCode);
+  return `
+    <ul class="list alerts-link">
+      <li class="row"><a class="row-main" href="#/alertes">
+        <div><div class="name">🔔 Alertes vent</div><div class="sub">${on ? 'Activées pour tous tes spots' : 'Être prévenu la veille quand il y a du vent'}</div></div>
+        <span class="chevron">›</span>
+      </a></li>
+    </ul>`;
 }
 
 async function loadBadge(spot, row) {
@@ -360,6 +412,55 @@ function renderAdd() {
     }, 350);
   });
   cleanup.push(() => clearTimeout(timer));
+}
+
+// ---------- Réglage des alertes ----------
+
+function renderAlerts() {
+  teardown();
+  setHeader({ title: 'Alertes vent', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
+
+  const spots = store.spots;
+  view.innerHTML = `
+    <div class="card">
+      <p>Chaque soir à 18 h, tu reçois une notification dans l'app <b>ntfy</b> si demain il y a entre <b>15 et 30 nœuds</b> pendant la journée sur un de tes spots.</p>
+      <label class="field"><span>Code d'alerte (le même que dans l'app ntfy)</span>
+        <input id="code" value="${esc(store.alertCode)}" placeholder="voilemeteo-…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      </label>
+      <button class="btn" id="save">Enregistrer</button>
+      <p id="status" class="muted"></p>
+    </div>
+    <div class="card">
+      <div class="card-title">Spots surveillés</div>
+      ${spots.length ? spots.map(s => `<div>⛵ ${esc(s.name)}</div>`).join('') : '<p class="muted">Aucun spot pour l\'instant : ajoute des spots dans ta liste.</p>'}
+      <p class="muted">Tous tes spots sont surveillés automatiquement. Un spot ajouté ou supprimé est pris en compte dans les 3 heures.</p>
+    </div>`;
+
+  const status = $('#status');
+  const showStatus = () => {
+    if (!ALERT_CODE_PATTERN.test(store.alertCode)) { status.textContent = 'Alertes pas encore activées.'; return; }
+    const last = store.lastSync;
+    status.textContent = last
+      ? `✅ Alertes activées · liste envoyée à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
+      : '⏳ Alertes activées · liste pas encore envoyée';
+  };
+  showStatus();
+
+  $('#save').onclick = async () => {
+    const code = $('#code').value.trim();
+    if (!ALERT_CODE_PATTERN.test(code)) {
+      status.textContent = '❌ Code invalide : recopie exactement le code de l\'app ntfy.';
+      return;
+    }
+    store.alertCode = code;
+    status.textContent = 'Envoi de ta liste de spots…';
+    try {
+      await syncSpots();
+      showStatus();
+    } catch {
+      status.textContent = '⚠️ Code enregistré, mais la liste n\'a pas pu être envoyée (réseau ?). Nouvel essai à la prochaine ouverture.';
+    }
+  };
 }
 
 // ---------- Détail d'un spot ----------
@@ -563,6 +664,8 @@ function drawChart(forecast, selected, available) {
 // ---------- Démarrage ----------
 
 route();
+// ntfy ne garde les messages que 12 h : on renvoie la liste à chaque ouverture de l'app.
+scheduleSpotSync();
 
 // Le service worker permet l'installation sur l'écran d'accueil et l'accès hors connexion.
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {

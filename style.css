@@ -289,3 +289,9 @@ input[type="search"], .field input {
 .wave, .temp { text-align: right; font-size: 13px; }
 .wave { color: var(--muted); }
 .rain { font-size: 11px; text-align: center; }
+
+/* Lien vers les alertes */
+.alerts-link { margin-top: 16px; }
+.chevron { color: var(--muted); font-size: 22px; }
+.card p { margin: 0 0 10px; }
+.card .btn { margin: 10px 0 8px; }

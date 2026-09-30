@@ -1,5 +1,5 @@
 // Service worker : garde l'app et les dernières prévisions pour un usage hors connexion (en mer !).
-const SHELL_CACHE = 'voilemeteo-shell-v10';
+const SHELL_CACHE = 'voilemeteo-shell-v11';
 const DATA_CACHE = 'voilemeteo-data-v1';
 const SHELL = [
   './',
@@ -62,5 +62,36 @@ self.addEventListener('fetch', event => {
         return response;
       })
       .catch(() => caches.match(request, { ignoreSearch: true }).then(hit => hit || Response.error()))
+  );
+});
+
+// Notifications push envoyées chaque soir par les alertes vent.
+self.addEventListener('push', event => {
+  let data = {};
+  try {
+    data = event.data ? event.data.json() : {};
+  } catch {
+    data = { body: event.data ? event.data.text() : '' };
+  }
+  event.waitUntil(
+    self.registration.showNotification(data.title || 'VoileMétéo', {
+      body: data.body || '',
+      icon: 'icons/icon-192.png',
+      badge: 'icons/icon-192.png',
+      tag: data.tag || 'voilemeteo',
+      data: { url: data.url || './' },
+    })
+  );
+});
+
+// Toucher la notification ouvre l'app (ou la remet au premier plan).
+self.addEventListener('notificationclick', event => {
+  event.notification.close();
+  const url = new URL((event.notification.data && event.notification.data.url) || './', self.registration.scope).href;
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then(windows => {
+      const open = windows.find(w => w.url.startsWith(self.registration.scope));
+      return open ? open.focus() : self.clients.openWindow(url);
+    })
   );
 });

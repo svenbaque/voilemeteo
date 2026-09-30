@@ -45,6 +45,21 @@ const store = {
   set alertCode(code) {
     try { localStorage.setItem('alertCode', code); } catch { /* ignore */ }
   },
+  get uid() {
+    let id = '';
+    try { id = localStorage.getItem('uid') || ''; } catch { /* ignore */ }
+    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
+      id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
+      try { localStorage.setItem('uid', id); } catch { /* ignore */ }
+    }
+    return id;
+  },
+  get pushOn() {
+    try { return localStorage.getItem('pushOn') === '1'; } catch { return false; }
+  },
+  set pushOn(on) {
+    try { localStorage.setItem('pushOn', on ? '1' : '0'); } catch { /* ignore */ }
+  },
   get lastSync() {
     try { return Number(localStorage.getItem('alertSync')) || 0; } catch { return 0; }
   },
@@ -61,29 +76,110 @@ const store = {
   },
 };
 
-// ---------- Alertes vent : envoi de la liste des spots ----------
-// Les alertes tournent chaque soir sur GitHub. Pour savoir quels spots surveiller, l'app publie
-// sa liste sur le sujet ntfy privé « <code>-spots » à chaque changement et à chaque ouverture.
+// ---------- Alertes vent ----------
+// Les alertes tournent chaque soir sur GitHub (dépôt privé voilemeteo-alertes).
+// Pour savoir à qui envoyer quoi, chaque appareil publie son abonnement aux notifications et
+// sa liste de spots sur un sujet ntfy de collecte, chiffrés : seul GitHub peut les lire.
+
+// Clé publique VAPID : identifie l'expéditeur des notifications push.
+const VAPID_PUBLIC_KEY = 'BJH0G1QOGgOd5cc8eYZ-dIhOLVigGTUOV2pokSKJgzH8yTzUMuXhrhmjUiVBJ1oyNzfcEJ0PVmwI7ie3QQcmEFQ';
+// Clé publique RSA : chiffre l'abonnement et les spots, seule la clé privée sur GitHub les déchiffre.
+const DATA_PUBLIC_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAytlveSWV7dIXHqOIzhPbpHm0vJvs8rfBAltQrYsOekI3nNRvjEE6k7eP2cuzR7OAQDIrWCFJ4dkYfRd7wiECDeDHFKkVru7wTwEiIRpnhe8+GWIMvZ9DHs4xiNKk67Ss/X+aFBRCBvdf5khEPmHg6cVPMbOPsrCN/E24u8Pz/hFPJvsLE2JHNdOcw/VIU9UxwDWKwj5yfQLn1bB0ZNRluPVhJNRyJAr7acA9skNXVGktxWc24xwDvpkbzF+nOlDUIpfJ9/hH4QTYfPg+4moXlow8EkSIUibFoP4imVjtGg7Gh72sx+3ywjHCp80BSv7QMEqJZn6aslsA/xY8DSOLAwIDAQAB';
+const COLLECT_TOPIC = 'voilemeteo-abonnes-91ytrw0i3gdslkd2';
 
 const ALERT_CODE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 let syncTimer = null;
 
 function scheduleSpotSync() {
   clearTimeout(syncTimer);
-  syncTimer = setTimeout(() => { syncSpots().catch(() => { /* réessai à la prochaine ouverture */ }); }, 1000);
+  syncTimer = setTimeout(() => {
+    syncSpots().catch(() => { /* réessai à la prochaine ouverture */ });
+    sendSubscription().catch(() => { /* réessai à la prochaine ouverture */ });
+  }, 1000);
 }
 
+const spotsForServer = () => store.spots.map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
+
+// Ancien système : liste des spots pour l'app ntfy (sera retiré).
 async function syncSpots() {
   const code = store.alertCode;
   if (!ALERT_CODE_PATTERN.test(code)) return false;
-  const spots = store.spots.map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
   const res = await fetch('https://ntfy.sh/', {
     method: 'POST',
-    body: JSON.stringify({ topic: `${code}-spots`, message: JSON.stringify({ v: 1, spots }) }),
+    body: JSON.stringify({ topic: `${code}-spots`, message: JSON.stringify({ v: 1, spots: spotsForServer() }) }),
   });
   if (!res.ok) throw new Error(`Envoi impossible (${res.status})`);
   store.lastSync = Date.now();
   return true;
+}
+
+const bytesToBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+const base64ToBytes = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
+
+async function deflate(bytes) {
+  if (!window.CompressionStream) return null;
+  const stream = new Blob([bytes]).stream().pipeThrough(new CompressionStream('deflate-raw'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+// Chiffrement hybride : AES-GCM pour les données, RSA-OAEP pour la clé AES.
+async function encryptForServer(obj) {
+  const plain = new TextEncoder().encode(JSON.stringify(obj));
+  const packed = await deflate(plain);
+  const rsa = await crypto.subtle.importKey('spki', base64ToBytes(DATA_PUBLIC_KEY), { name: 'RSA-OAEP', hash: 'SHA-256' }, false, ['encrypt']);
+  const aes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, ['encrypt']);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const data = await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, aes, packed || plain);
+  const key = await crypto.subtle.encrypt({ name: 'RSA-OAEP' }, rsa, await crypto.subtle.exportKey('raw', aes));
+  return JSON.stringify({ v: 1, z: packed ? 1 : 0, k: bytesToBase64(key), iv: bytesToBase64(iv), d: bytesToBase64(data) });
+}
+
+async function publishToCollector(payload) {
+  const res = await fetch('https://ntfy.sh/', {
+    method: 'POST',
+    body: JSON.stringify({ topic: COLLECT_TOPIC, message: await encryptForServer(payload) }),
+  });
+  if (!res.ok) throw new Error(`Envoi impossible (${res.status})`);
+}
+
+const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window;
+const isStandalone = () => (window.matchMedia && matchMedia('(display-mode: standalone)').matches) || navigator.standalone === true;
+
+async function currentSubscription() {
+  const reg = await navigator.serviceWorker.ready;
+  return reg.pushManager.getSubscription();
+}
+
+// Renvoie l'abonnement et la liste des spots (à chaque ouverture et à chaque changement de spots).
+async function sendSubscription() {
+  if (!store.pushOn || !pushSupported() || Notification.permission !== 'granted') return false;
+  let sub = await currentSubscription();
+  if (!sub) {
+    const reg = await navigator.serviceWorker.ready;
+    sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(VAPID_PUBLIC_KEY) });
+  }
+  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer() });
+  store.lastSync = Date.now();
+  return true;
+}
+
+// Doit être appelée directement depuis un geste de l'utilisateur (iOS l'exige).
+async function enablePush() {
+  const permission = await Notification.requestPermission();
+  if (permission !== 'granted') throw new Error(permission === 'denied' ? 'refusé' : 'ignoré');
+  const reg = await navigator.serviceWorker.ready;
+  const sub = (await reg.pushManager.getSubscription())
+    || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(VAPID_PUBLIC_KEY) });
+  store.pushOn = true;
+  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer() });
+  store.lastSync = Date.now();
+}
+
+async function disablePush() {
+  store.pushOn = false;
+  const sub = await currentSubscription().catch(() => null);
+  if (sub) await sub.unsubscribe().catch(() => {});
+  await publishToCollector({ uid: store.uid, sub: null, spots: [] });
 }
 
 // ---------- API Open-Meteo ----------
@@ -364,7 +460,7 @@ function enableDragSort(list) {
 }
 
 function alertsLink() {
-  const on = ALERT_CODE_PATTERN.test(store.alertCode);
+  const on = store.pushOn;
   return `
     <ul class="list alerts-link">
       <li class="row"><a class="row-main" href="#/alertes">
@@ -557,14 +653,25 @@ function renderAlerts() {
   setHeader({ title: 'Alertes vent', left: { label: '‹ Paramètres', onClick: () => { location.hash = '#/reglages'; } } });
 
   const spots = store.spots;
+  const supported = pushSupported();
+  const standalone = isStandalone();
+  const denied = supported && Notification.permission === 'denied';
+  const usable = supported && standalone && !denied;
+  const on = store.pushOn && supported && Notification.permission === 'granted';
+
+  let warning = '';
+  if (!standalone) warning = "Pour recevoir les alertes, ouvre VoileMétéo depuis son icône sur l'écran d'accueil (dans Safari : Partager → Sur l'écran d'accueil).";
+  else if (!supported) warning = 'Ton téléphone ne permet pas encore les notifications des web apps (il faut iOS 16.4 ou plus récent).';
+  else if (denied) warning = 'Les notifications sont bloquées : autorise-les dans Réglages de l\'iPhone → Notifications → VoileMétéo.';
+
   view.innerHTML = `
     <div class="card">
-      <p>Chaque soir à 18 h, tu reçois une notification dans l'app <b>ntfy</b> si demain il y a entre <b>15 et 30 nœuds</b> pendant la journée sur un de tes spots.</p>
-      <label class="field"><span>Code d'alerte (le même que dans l'app ntfy)</span>
-        <input id="code" value="${esc(store.alertCode)}" placeholder="voilemeteo-…" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false">
+      <p>Chaque soir à 18 h, tu reçois une notification si demain il y a entre <b>15 et 30 nœuds</b> pendant la journée sur un de tes spots.</p>
+      <label class="switch-row${usable ? '' : ' disabled'}">
+        <span class="txt"><span>Recevoir les alertes</span></span>
+        <input type="checkbox" class="switch" id="push-toggle" ${on ? 'checked' : ''} ${usable ? '' : 'disabled'}>
       </label>
-      <button class="btn" id="save">Enregistrer</button>
-      <p id="status" class="muted"></p>
+      <p id="status" class="muted">${esc(warning)}</p>
     </div>
     <div class="card">
       <div class="card-title">Spots surveillés</div>
@@ -574,27 +681,34 @@ function renderAlerts() {
 
   const status = $('#status');
   const showStatus = () => {
-    if (!ALERT_CODE_PATTERN.test(store.alertCode)) { status.textContent = 'Alertes pas encore activées.'; return; }
+    if (warning) return;
+    if (!store.pushOn) { status.textContent = 'Alertes désactivées.'; return; }
     const last = store.lastSync;
     status.textContent = last
-      ? `✅ Alertes activées · liste envoyée à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}`
-      : '⏳ Alertes activées · liste pas encore envoyée';
+      ? `✅ Alertes activées · mises à jour à ${new Date(last).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}. Elles commencent dans les 3 heures.`
+      : '⏳ Alertes activées, en attente d\'envoi (réseau ?).';
   };
   showStatus();
 
-  $('#save').onclick = async () => {
-    const code = $('#code').value.trim();
-    if (!ALERT_CODE_PATTERN.test(code)) {
-      status.textContent = '❌ Code invalide : recopie exactement le code de l\'app ntfy.';
-      return;
-    }
-    store.alertCode = code;
-    status.textContent = 'Envoi de ta liste de spots…';
+  const toggle = $('#push-toggle');
+  toggle.onchange = async () => {
+    toggle.disabled = true;
     try {
-      await syncSpots();
+      if (toggle.checked) {
+        status.textContent = 'Activation…';
+        await enablePush();
+      } else {
+        status.textContent = 'Désactivation…';
+        await disablePush();
+      }
       showStatus();
-    } catch {
-      status.textContent = '⚠️ Code enregistré, mais la liste n\'a pas pu être envoyée (réseau ?). Nouvel essai à la prochaine ouverture.';
+    } catch (e) {
+      toggle.checked = store.pushOn;
+      status.textContent = e.message === 'refusé'
+        ? 'Notifications refusées : autorise-les dans Réglages de l\'iPhone → Notifications → VoileMétéo.'
+        : '⚠️ Impossible pour le moment (réseau ?). Réessaie dans un instant.';
+    } finally {
+      toggle.disabled = false;
     }
   };
 }

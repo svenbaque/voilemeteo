@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="VoileMétéo">
   <meta name="description" content="Prévisions de vent heure par heure pour tes spots de voile : AROME, ARPEGE, ICON, ECMWF, GFS.">
   <title>VoileMétéo</title>
+  <script>try { var t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="icons/icon-180.png">
   <link rel="icon" href="icons/icon.svg" type="image/svg+xml">
@@ -20,7 +21,7 @@
   <header id="bar">
     <button id="left" class="hbtn" hidden></button>
     <h1 id="title">VoileMétéo</h1>
-    <button id="right" class="hbtn" hidden></button>
+    <div class="hright"><button id="extra" class="hbtn" hidden></button><button id="right" class="hbtn" hidden></button></div>
   </header>
   <main id="view"></main>
 

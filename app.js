@@ -32,6 +32,12 @@ const store = {
   set view(v) {
     try { localStorage.setItem('view.v2', v); } catch { /* ignore */ }
   },
+  get theme() {
+    try { const t = localStorage.getItem('theme'); return t === 'light' || t === 'dark' ? t : 'auto'; } catch { return 'auto'; }
+  },
+  set theme(t) {
+    try { localStorage.setItem('theme', t); } catch { /* ignore */ }
+  },
   get alertCode() {
     try { return localStorage.getItem('alertCode') || ''; } catch { return ''; }
   },
@@ -161,6 +167,20 @@ function windColor(kn) {
 }
 const windText = kn => (kn >= 25 ? '#fff' : '#000');
 
+// Rafales : même échelle que le vent moyen, en couleurs vives.
+function gustColor(kn) {
+  if (kn < 5) return '#1e6fd9';
+  if (kn < 10) return '#0096c7';
+  if (kn < 15) return '#1faa4a';
+  if (kn < 20) return '#f2c200';
+  if (kn < 25) return '#f57c00';
+  if (kn < 30) return '#e02424';
+  if (kn < 35) return '#c2185b';
+  if (kn < 40) return '#8e24aa';
+  return '#4a148c';
+}
+const gustText = kn => (kn >= 15 && kn < 25 ? '#000' : '#fff');
+
 function cardinal(deg) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
   return dirs[((Math.round(deg / 22.5) % 16) + 16) % 16];
@@ -205,11 +225,11 @@ function teardown() {
   window.scrollTo(0, 0);
 }
 
-function setHeader({ title, left, right }) {
+function setHeader({ title, left, extra, right }) {
   $('#title').textContent = title;
-  for (const [el, cfg] of [[$('#left'), left], [$('#right'), right]]) {
+  for (const [el, cfg] of [[$('#left'), left], [$('#extra'), extra], [$('#right'), right]]) {
     el.hidden = !cfg;
-    el.className = 'hbtn' + (cfg && cfg.big ? ' big' : '');
+    el.className = 'hbtn' + (cfg && cfg.big ? ' big' : '') + (cfg && cfg.cls ? ' ' + cfg.cls : '');
     if (!cfg) continue;
     el.textContent = cfg.label;
     el.setAttribute('aria-label', cfg.aria || cfg.label);
@@ -223,6 +243,7 @@ function route() {
   if (path.startsWith('/spot/')) renderDetail(decodeURIComponent(path.slice(6)));
   else if (path === '/add') renderAdd();
   else if (path === '/alertes') renderAlerts();
+  else if (path === '/reglages') renderSettings();
   else renderList();
 }
 window.addEventListener('hashchange', route);
@@ -239,6 +260,7 @@ function renderList() {
   setHeader({
     title: 'Mes spots',
     left: spots.length ? { label: editing ? 'OK' : 'Modifier', onClick: () => { editing = !editing; renderList(); } } : null,
+    extra: { label: '⚙︎', aria: 'Paramètres', cls: 'gear', onClick: () => { location.hash = '#/reglages'; } },
     right: { label: '+', aria: 'Ajouter un spot', big: true, onClick: () => { location.hash = '#/add'; } },
   });
 
@@ -426,6 +448,56 @@ function renderAdd() {
     }, 350);
   });
   cleanup.push(() => clearTimeout(timer));
+}
+
+// ---------- Paramètres ----------
+
+function applyTheme() {
+  const t = store.theme;
+  if (t === 'auto') delete document.documentElement.dataset.theme;
+  else document.documentElement.dataset.theme = t;
+}
+
+function renderSettings() {
+  teardown();
+  setHeader({ title: 'Paramètres', left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } } });
+
+  const draw = () => {
+    const model = store.model;
+    const theme = store.theme;
+    const option = (attrs, dot, title, sub, on) => `
+      <li><button class="option" ${attrs}>
+        ${dot ? `<span class="dot" style="background:${dot}"></span>` : ''}
+        <span class="txt"><span>${title}</span>${sub ? `<span class="sub muted">${sub}</span>` : ''}</span>
+        <span class="check">${on ? '✓' : ''}</span>
+      </button></li>`;
+
+    view.innerHTML = `
+      <div class="card">
+        <div class="card-title">Modèle météo de référence</div>
+        <ul class="settings-list">
+          ${MODELS.map(m => option(`data-model="${m.id}"`, m.color, esc(m.name), esc(m.info), m.id === model)).join('')}
+        </ul>
+        <p class="muted">Utilisé pour le vent affiché dans ta liste de spots et ouvert en premier dans le détail d'un spot. S'il ne couvre pas un spot (AROME hors de France), ECMWF est utilisé à la place.</p>
+      </div>
+      <div class="card">
+        <div class="card-title">Apparence</div>
+        <ul class="settings-list">
+          ${option('data-theme="auto"', '', 'Automatique', 'Suit le réglage de ton iPhone', theme === 'auto')}
+          ${option('data-theme="light"', '', 'Clair', '', theme === 'light')}
+          ${option('data-theme="dark"', '', 'Sombre', '', theme === 'dark')}
+        </ul>
+      </div>
+      <p class="foot">VoileMétéo · données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
+
+    view.querySelectorAll('[data-model]').forEach(btn => {
+      btn.onclick = () => { store.model = btn.dataset.model; draw(); };
+    });
+    view.querySelectorAll('[data-theme]').forEach(btn => {
+      btn.onclick = () => { store.theme = btn.dataset.theme; applyTheme(); draw(); };
+    });
+  };
+  draw();
 }
 
 // ---------- Réglage des alertes ----------
@@ -648,7 +720,7 @@ function detailView(forecast) {
               <span>${String(hourOf(p.time, tz)).padStart(2, '0')}h</span>
               <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
               <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
-              <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
+              <span class="gust" style="${p.gusts != null ? `background:${gustColor(p.gusts)};color:${gustText(p.gusts)}` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
               <span class="agree fiab" role="button" data-label="${esc(acc.label)}" aria-label="${esc(acc.label)}">${acc.emoji}</span>
               <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
               <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>
@@ -668,6 +740,7 @@ function detailView(forecast) {
 
 // ---------- Démarrage ----------
 
+applyTheme();
 route();
 // ntfy ne garde les messages que 12 h : on renvoie la liste à chaque ouverture de l'app.
 scheduleSpotSync();

@@ -39,27 +39,6 @@ const store = {
   set theme(t) {
     try { localStorage.setItem('theme', t); } catch { /* ignore */ }
   },
-  get alertCode() {
-    try { return localStorage.getItem('alertCode') || ''; } catch { return ''; }
-  },
-  set alertCode(code) {
-    try { localStorage.setItem('alertCode', code); } catch { /* ignore */ }
-  },
-  get uid() {
-    let id = '';
-    try { id = localStorage.getItem('uid') || ''; } catch { /* ignore */ }
-    if (!/^[A-Za-z0-9_-]{8,64}$/.test(id)) {
-      id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now()) + Math.random().toString(36).slice(2);
-      try { localStorage.setItem('uid', id); } catch { /* ignore */ }
-    }
-    return id;
-  },
-  get pushOn() {
-    try { return localStorage.getItem('pushOn') === '1'; } catch { return false; }
-  },
-  set pushOn(on) {
-    try { localStorage.setItem('pushOn', on ? '1' : '0'); } catch { /* ignore */ }
-  },
   get lastSync() {
     try { return Number(localStorage.getItem('alertSync')) || 0; } catch { return 0; }
   },
@@ -87,31 +66,16 @@ const VAPID_PUBLIC_KEY = 'BJH0G1QOGgOd5cc8eYZ-dIhOLVigGTUOV2pokSKJgzH8yTzUMuXhrh
 const DATA_PUBLIC_KEY = 'MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAytlveSWV7dIXHqOIzhPbpHm0vJvs8rfBAltQrYsOekI3nNRvjEE6k7eP2cuzR7OAQDIrWCFJ4dkYfRd7wiECDeDHFKkVru7wTwEiIRpnhe8+GWIMvZ9DHs4xiNKk67Ss/X+aFBRCBvdf5khEPmHg6cVPMbOPsrCN/E24u8Pz/hFPJvsLE2JHNdOcw/VIU9UxwDWKwj5yfQLn1bB0ZNRluPVhJNRyJAr7acA9skNXVGktxWc24xwDvpkbzF+nOlDUIpfJ9/hH4QTYfPg+4moXlow8EkSIUibFoP4imVjtGg7Gh72sx+3ywjHCp80BSv7QMEqJZn6aslsA/xY8DSOLAwIDAQAB';
 const COLLECT_TOPIC = 'voilemeteo-abonnes-91ytrw0i3gdslkd2';
 
-const ALERT_CODE_PATTERN = /^[A-Za-z0-9_-]{8,64}$/;
 let syncTimer = null;
 
 function scheduleSpotSync() {
   clearTimeout(syncTimer);
   syncTimer = setTimeout(() => {
-    syncSpots().catch(() => { /* réessai à la prochaine ouverture */ });
     sendSubscription().catch(() => { /* réessai à la prochaine ouverture */ });
   }, 1000);
 }
 
 const spotsForServer = () => store.spots.map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
-
-// Ancien système : liste des spots pour l'app ntfy (sera retiré).
-async function syncSpots() {
-  const code = store.alertCode;
-  if (!ALERT_CODE_PATTERN.test(code)) return false;
-  const res = await fetch('https://ntfy.sh/', {
-    method: 'POST',
-    body: JSON.stringify({ topic: `${code}-spots`, message: JSON.stringify({ v: 1, spots: spotsForServer() }) }),
-  });
-  if (!res.ok) throw new Error(`Envoi impossible (${res.status})`);
-  store.lastSync = Date.now();
-  return true;
-}
 
 const bytesToBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const base64ToBytes = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
@@ -933,6 +897,7 @@ function detailView(forecast) {
 // ---------- Démarrage ----------
 
 applyTheme();
+try { localStorage.removeItem('alertCode'); } catch { /* ancien système ntfy, plus utilisé */ }
 route();
 // ntfy ne garde les messages que 12 h : on renvoie la liste à chaque ouverture de l'app.
 scheduleSpotSync();

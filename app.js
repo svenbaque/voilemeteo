@@ -228,6 +228,9 @@ function windColor(kn) {
 }
 const windText = kn => (kn >= 25 ? '#fff' : '#000');
 
+// Rafales : même échelle que le vent moyen, adoucie par un peu de gris (vive mais moins saturée).
+const gustColor = kn => `color-mix(in srgb, ${windColor(kn)} 72%, #a3a3ab)`;
+
 
 function cardinal(deg) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
@@ -1002,7 +1005,7 @@ function detailView(forecast) {
               <span>${String(hourOf(p.time, tz)).padStart(2, '0')}h</span>
               <span class="dir">${p.dir != null ? arrow(p.dir) + cardinal(p.dir) : ''}</span>
               <span class="kn" style="background:${windColor(p.speed)};color:${windText(p.speed)}">${Math.round(p.speed)}</span>
-              <span class="gust" style="${p.gusts != null ? `background:${windColor(p.gusts)}59` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
+              <span class="gust" style="${p.gusts != null ? `background:${gustColor(p.gusts)};color:#000` : ''}">${p.gusts != null ? Math.round(p.gusts) : '–'}</span>
               <span class="agree fiab" role="button" data-label="${esc(acc.label)}" aria-label="${esc(acc.label)}">${acc.emoji}</span>
               <span class="wave">${wave != null ? wave.toFixed(1).replace('.', ',') + ' m' : ''}</span>
               <span class="temp">${p.temp != null ? Math.round(p.temp) + '°' : ''}</span>

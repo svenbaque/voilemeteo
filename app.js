@@ -27,10 +27,10 @@ const store = {
     scheduleSpotSync();
   },
   get view() {
-    try { return localStorage.getItem('view') === 'detail' ? 'detail' : 'compare'; } catch { return 'compare'; }
+    try { return localStorage.getItem('view.v2') === 'compare' ? 'compare' : 'detail'; } catch { return 'detail'; }
   },
   set view(v) {
-    try { localStorage.setItem('view', v); } catch { /* ignore */ }
+    try { localStorage.setItem('view.v2', v); } catch { /* ignore */ }
   },
   get alertCode() {
     try { return localStorage.getItem('alertCode') || ''; } catch { return ''; }
@@ -493,8 +493,8 @@ async function renderDetail(id) {
 
   view.innerHTML = `
     <div class="seg" id="seg">
-      <button data-view="compare">Comparer les modèles</button>
       <button data-view="detail">Détail par modèle</button>
+      <button data-view="compare">Comparer les modèles</button>
     </div>
     <div id="body"><div class="loading"><span class="spinner"></span> Chargement des modèles…</div></div>`;
 

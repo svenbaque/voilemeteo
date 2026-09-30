@@ -39,6 +39,12 @@ const store = {
   set theme(t) {
     try { localStorage.setItem('theme', t); } catch { /* ignore */ }
   },
+  get weekly() {
+    try { return localStorage.getItem('hebdo') !== '0'; } catch { return true; }
+  },
+  set weekly(on) {
+    try { localStorage.setItem('hebdo', on ? '1' : '0'); } catch { /* ignore */ }
+  },
   get lastSync() {
     try { return Number(localStorage.getItem('alertSync')) || 0; } catch { return 0; }
   },
@@ -75,7 +81,7 @@ function scheduleSpotSync() {
   }, 1000);
 }
 
-const spotsForServer = () => store.spots.map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
+const spotsForServer = () => store.spots.filter(s => s.alert !== false).map(s => ({ nom: s.name, lat: Math.round(s.lat * 1e4) / 1e4, lon: Math.round(s.lon * 1e4) / 1e4 }));
 
 const bytesToBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
 const base64ToBytes = b64 => Uint8Array.from(atob(b64.replace(/-/g, '+').replace(/_/g, '/').padEnd(Math.ceil(b64.length / 4) * 4, '=')), c => c.charCodeAt(0));
@@ -122,7 +128,7 @@ async function sendSubscription() {
     const reg = await navigator.serviceWorker.ready;
     sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(VAPID_PUBLIC_KEY) });
   }
-  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer() });
+  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer(), hebdo: store.weekly });
   store.lastSync = Date.now();
   return true;
 }
@@ -135,7 +141,7 @@ async function enablePush() {
   const sub = (await reg.pushManager.getSubscription())
     || await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: base64ToBytes(VAPID_PUBLIC_KEY) });
   store.pushOn = true;
-  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer() });
+  await publishToCollector({ uid: store.uid, sub: sub.toJSON(), spots: spotsForServer(), hebdo: store.weekly });
   store.lastSync = Date.now();
 }
 
@@ -450,7 +456,7 @@ function installTutorial() {
   if (isStandalone()) return '';
   let dismissed = false;
   try { dismissed = sessionStorage.getItem('tutoMasque') === '1'; } catch { /* ignore */ }
-  if (dismissed) return '<button class="install-reopen" id="tuto-open">📲 Installer VoileMétéo sur ton téléphone</button>';
+  if (dismissed) return '<button class="install-reopen" id="tuto-open">📲 Installer Wind Spot sur ton téléphone</button>';
 
   let steps;
   if (isAndroid()) {
@@ -460,13 +466,13 @@ function installTutorial() {
       <li>Ouvre cette page dans <b>Chrome</b>.</li>
       <li>Touche le menu <b>⋮</b> en haut à droite.</li>
       <li>Choisis <b>Ajouter à l'écran d'accueil</b> (ou <b>Installer l'application</b>).</li>
-      <li>Ouvre VoileMétéo depuis sa nouvelle icône.</li>`;
+      <li>Ouvre Wind Spot depuis sa nouvelle icône.</li>`;
   } else if (isIOS()) {
     steps = `
       <li>Ouvre cette page dans <b>Safari</b>.</li>
       <li>Touche le bouton <b>Partager</b> ${SHARE_ICON} (en bas de l'écran, ou en haut sur iPad).</li>
       <li>Fais défiler et choisis <b>Sur l'écran d'accueil</b>.</li>
-      <li>Touche <b>Ajouter</b>, puis ouvre VoileMétéo depuis sa nouvelle icône.</li>`;
+      <li>Touche <b>Ajouter</b>, puis ouvre Wind Spot depuis sa nouvelle icône.</li>`;
   } else {
     steps = `
       <li>Ouvre ce lien sur ton <b>téléphone</b> : <b>svenbaque.github.io/voilemeteo</b></li>
@@ -478,7 +484,7 @@ function installTutorial() {
     <div class="card install">
       <div class="install-head">
         <img src="icons/icon-180.png" alt="" width="44" height="44">
-        <div><b>Installe VoileMétéo</b><div class="sub muted">Sur ton écran d'accueil, comme une vraie app : plein écran, et notifications quand il y a du vent.</div></div>
+        <div><b>Installe Wind Spot</b><div class="sub muted">Sur ton écran d'accueil, comme une vraie app : plein écran, et notifications quand il y a du vent.</div></div>
       </div>
       <ol class="install-steps">${steps}</ol>
       ${installPrompt ? '<button class="btn" id="install-btn">Installer l\'app</button>' : ''}
@@ -566,7 +572,7 @@ function renderAdd() {
     pin = { lat, lon };
     if (map) {
       if (marker) marker.setLatLng([lat, lon]);
-      else marker = L.marker([lat, lon], { icon: L.divIcon({ className: 'pin', html: '⛵', iconSize: [32, 32], iconAnchor: [16, 30] }) }).addTo(map);
+      else marker = L.marker([lat, lon], { icon: L.divIcon({ className: 'pin', html: '📍', iconSize: [32, 32], iconAnchor: [16, 30] }) }).addTo(map);
     }
     $('#pos').textContent = `Position : ${lat.toFixed(4)}°, ${lon.toFixed(4)}°`;
     update();
@@ -634,8 +640,8 @@ const APP_URL = 'https://svenbaque.github.io/voilemeteo/';
 // Ouvre le menu de partage de l'iPhone (Messages, WhatsApp…), ou copie le lien à défaut.
 async function shareApp() {
   const data = {
-    title: 'VoileMétéo',
-    text: 'VoileMétéo : le vent heure par heure sur tes spots de voile (AROME, ECMWF…). Ouvre le lien dans Safari puis Partager → Sur l\'écran d\'accueil.',
+    title: 'Wind Spot',
+    text: 'Wind Spot : le vent heure par heure sur tes spots (AROME, ECMWF…). Ouvre le lien dans Safari puis Partager → Sur l\'écran d\'accueil.',
     url: APP_URL,
   };
   const status = $('#share-status');
@@ -760,24 +766,43 @@ function renderAlerts() {
   const on = store.pushOn && supported && Notification.permission === 'granted';
 
   let warning = '';
-  if (!standalone) warning = "Pour recevoir les notifications, ouvre VoileMétéo depuis son icône sur l'écran d'accueil (dans Safari : Partager → Sur l'écran d'accueil).";
+  if (!standalone) warning = "Pour recevoir les notifications, ouvre Wind Spot depuis son icône sur l'écran d'accueil (dans Safari : Partager → Sur l'écran d'accueil).";
   else if (!supported) warning = 'Ton téléphone ne permet pas encore les notifications des web apps (il faut iOS 16.4 ou plus récent).';
-  else if (denied) warning = 'Les notifications sont bloquées : autorise-les dans Réglages de l\'iPhone → Notifications → VoileMétéo.';
+  else if (denied) warning = 'Les notifications sont bloquées : autorise-les dans Réglages de l\'iPhone → Notifications → Wind Spot.';
 
   view.innerHTML = `
     <div class="card">
-      <p>Chaque soir à 18 h, tu reçois une notification si demain il y a entre <b>15 et 30 nœuds</b> pendant la journée sur un de tes spots.</p>
-      <label class="switch-row${usable ? '' : ' disabled'}">
-        <span class="txt"><span>Recevoir les notifications</span></span>
-        <input type="checkbox" class="switch" id="push-toggle" ${on ? 'checked' : ''} ${usable ? '' : 'disabled'}>
-      </label>
+      <ul class="settings-list">
+        <li><label class="switch-row${usable ? '' : ' disabled'}">
+          <span class="txt"><span>Recevoir les notifications</span><span class="sub muted">Chaque soir à 18 h, s'il y a demain entre 15 et 30 nœuds en journée sur un de tes spots</span></span>
+          <input type="checkbox" class="switch" id="push-toggle" ${on ? 'checked' : ''} ${usable ? '' : 'disabled'}>
+        </label></li>
+        <li><label class="switch-row${on ? '' : ' disabled'}">
+          <span class="txt"><span>Point du vendredi</span><span class="sub muted">Chaque vendredi à 18 h, le vent de la semaine à venir</span></span>
+          <input type="checkbox" class="switch" id="weekly-toggle" ${store.weekly ? 'checked' : ''} ${on ? '' : 'disabled'}>
+        </label></li>
+      </ul>
       <p id="status" class="muted">${esc(warning)}</p>
     </div>
     <div class="card">
       <div class="card-title">Spots surveillés</div>
-      ${spots.length ? spots.map(s => `<div>⛵ ${esc(s.name)}</div>`).join('') : '<p class="muted">Aucun spot pour l\'instant : ajoute des spots dans ta liste.</p>'}
-      <p class="muted">Tous tes spots sont surveillés automatiquement. Un spot ajouté ou supprimé est pris en compte dans les 3 heures.</p>
+      ${spots.length ? `<ul class="settings-list">${spots.map(s => `
+        <li><label class="check-row">
+          <input type="checkbox" class="tick" data-spot="${esc(s.id)}" ${s.alert !== false ? 'checked' : ''}>
+          <span>${esc(s.name)}</span>
+        </label></li>`).join('')}</ul>` : '<p class="muted">Aucun spot pour l\'instant : ajoute des spots dans ta liste.</p>'}
+      <p class="muted">Décoche un spot pour ne plus être prévenu. Les nouveaux spots sont cochés automatiquement. Les changements sont pris en compte dans les 3 heures.</p>
     </div>`;
+
+  view.querySelectorAll('.tick').forEach(box => {
+    box.onchange = () => {
+      store.spots = store.spots.map(s => (s.id === box.dataset.spot ? { ...s, alert: box.checked } : s));
+    };
+  });
+  $('#weekly-toggle').onchange = e => {
+    store.weekly = e.target.checked;
+    scheduleSpotSync();
+  };
 
   const status = $('#status');
   const showStatus = () => {
@@ -802,10 +827,13 @@ function renderAlerts() {
         await disablePush();
       }
       showStatus();
+      const weekly = $('#weekly-toggle');
+      weekly.disabled = !store.pushOn;
+      weekly.closest('.switch-row').classList.toggle('disabled', !store.pushOn);
     } catch (e) {
       toggle.checked = store.pushOn;
       status.textContent = e.message === 'refusé'
-        ? 'Notifications refusées : autorise-les dans Réglages de l\'iPhone → Notifications → VoileMétéo.'
+        ? 'Notifications refusées : autorise-les dans Réglages de l\'iPhone → Notifications → Wind Spot.'
         : '⚠️ Impossible pour le moment (réseau ?). Réessaie dans un instant.';
     } finally {
       toggle.disabled = false;

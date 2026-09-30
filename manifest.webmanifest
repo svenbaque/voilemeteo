@@ -1,6 +1,6 @@
 {
-  "name": "VoileMétéo",
-  "short_name": "VoileMétéo",
+  "name": "Wind Spot",
+  "short_name": "Wind Spot",
   "description": "Prévisions de vent heure par heure pour tes spots de voile.",
   "lang": "fr",
   "start_url": "./",

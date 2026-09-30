@@ -526,3 +526,21 @@ input[type="search"], .field input {
   margin-left: 6px;
   vertical-align: 2px;
 }
+
+/* Cases à cocher des spots surveillés */
+.check-row { display: flex; align-items: center; gap: 12px; padding: 11px 2px; cursor: pointer; }
+.tick {
+  -webkit-appearance: none;
+  appearance: none;
+  flex: none;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  border: 2px solid var(--muted);
+  border-radius: 50%;
+  display: grid;
+  place-content: center;
+  cursor: pointer;
+}
+.tick:checked { background: var(--accent); border-color: var(--accent); }
+.tick:checked::after { content: "✓"; color: #fff; font-size: 14px; font-weight: 800; line-height: 1; }

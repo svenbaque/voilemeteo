@@ -1,5 +1,5 @@
 // Service worker : garde l'app et les dernières prévisions pour un usage hors connexion (en mer !).
-const SHELL_CACHE = 'voilemeteo-shell-v18';
+const SHELL_CACHE = 'voilemeteo-shell-v19';
 const DATA_CACHE = 'voilemeteo-data-v1';
 const SHELL = [
   './',
@@ -74,7 +74,7 @@ self.addEventListener('push', event => {
     data = { body: event.data ? event.data.text() : '' };
   }
   event.waitUntil(
-    self.registration.showNotification(data.title || 'VoileMétéo', {
+    self.registration.showNotification(data.title || 'Wind Spot', {
       body: data.body || '',
       icon: 'icons/icon-192.png',
       badge: 'icons/icon-192.png',

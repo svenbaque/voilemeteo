@@ -280,8 +280,7 @@ function renderList() {
             ${editing ? '<span class="grip" aria-label="Faire glisser pour déplacer">≡</span>' : ''}
           </li>`;
       }).join('')}
-    </ul>
-    <p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · Météo-France, DWD, ECMWF, NOAA</p>`;
+    </ul>`;
 
   view.querySelectorAll('[data-act]').forEach(btn => {
     btn.onclick = () => {
@@ -531,7 +530,7 @@ function renderSettings() {
           </label></li>
         </ul>
       </div>
-      <p class="foot">VoileMétéo · données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
+      <p class="foot">Sources des prévisions : <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> (Météo-France, DWD, ECMWF, NOAA)</p>`;
 
     view.querySelectorAll('[data-model]').forEach(btn => {
       btn.onclick = () => { store.model = btn.dataset.model; draw(); };
@@ -632,7 +631,6 @@ async function renderDetail(id) {
   }
   if (token !== renderToken) return;
 
-  const footer = `<p class="foot">Données <a href="https://open-meteo.com" target="_blank" rel="noopener">Open-Meteo</a> · mises à jour à ${new Date(forecast.fetchedAt).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}</p>`;
 
   const draw = () => {
     const mode = store.view;
@@ -640,7 +638,7 @@ async function renderDetail(id) {
       btn.classList.toggle('on', btn.dataset.view === mode);
       btn.onclick = () => { store.view = btn.dataset.view; draw(); };
     });
-    $('#body').innerHTML = (mode === 'detail' ? detailView(forecast, draw) : compareView(forecast)) + footer;
+    $('#body').innerHTML = mode === 'detail' ? detailView(forecast, draw) : compareView(forecast);
     // Toucher ✓ ~ ! affiche l'écart entre les modèles à cette heure.
     $('#body').onclick = e => {
       const sign = e.target.closest('.agree[data-label]');

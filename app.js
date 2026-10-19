@@ -168,6 +168,105 @@ async function disablePush() {
   await publishToCollector({ uid: store.uid, sub: null, spots: [] });
 }
 
+// ---------- Vent mesuré en temps réel (balises, via winds.mobi) ----------
+// winds.mobi regroupe gratuitement les balises OpenWindMap/Pioupiou, FFVL, Holfuy, aéroports…
+// Les vitesses y sont en km/h : on les convertit en nœuds.
+
+const WINDS_API = 'https://winds.mobi/api/2.3';
+const KMH_PER_KT = 1.852;
+const STATION_MAX_AGE = 2 * 3600; // sans mesure depuis 2 h, une balise est considérée hors service
+
+function distanceKm(lat1, lon1, lat2, lon2) {
+  const rad = x => (x * Math.PI) / 180;
+  const a = Math.sin(rad(lat2 - lat1) / 2) ** 2 + Math.cos(rad(lat1)) * Math.cos(rad(lat2)) * Math.sin(rad(lon2 - lon1) / 2) ** 2;
+  return 2 * 6371 * Math.asin(Math.sqrt(a));
+}
+
+function toStation(raw, spot) {
+  const [lon, lat] = raw.loc.coordinates;
+  const last = raw.last;
+  return {
+    id: raw._id,
+    name: raw.short || raw.name,
+    provider: raw['pv-name'],
+    dist: distanceKm(spot.lat, spot.lon, lat, lon),
+    last: last && last['w-avg'] != null ? {
+      time: last._id,
+      speed: last['w-avg'] / KMH_PER_KT,
+      gusts: last['w-max'] != null ? last['w-max'] / KMH_PER_KT : null,
+      dir: last['w-dir'],
+    } : null,
+  };
+}
+
+const isFresh = st => !!(st && st.last && Date.now() / 1000 - st.last.time < STATION_MAX_AGE);
+
+async function nearbyStations(spot, limit = 8) {
+  const list = await getJSON(`${WINDS_API}/stations/?` + new URLSearchParams({ 'near-lat': spot.lat, 'near-lon': spot.lon, limit }));
+  // Une même balise peut être relayée par deux réseaux (FFVL et OpenWindMap) : on n'en garde qu'une.
+  const seen = new Set();
+  return list.map(raw => toStation(raw, spot)).filter(st => {
+    const key = `${st.name.toLowerCase()}|${st.dist.toFixed(1)}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+const liveCache = new Map();
+
+// Balise du spot : celle choisie par l'utilisateur, sinon la plus proche qui mesure encore.
+async function liveForSpot(spot) {
+  const key = `${spot.id}|${spot.station || 'auto'}`;
+  const hit = liveCache.get(key);
+  if (hit && Date.now() - hit.at < 2 * 60 * 1000) return hit.station;
+  let station = null;
+  if (spot.station) {
+    try {
+      station = toStation(await getJSON(`${WINDS_API}/stations/${encodeURIComponent(spot.station)}/`), spot);
+    } catch { /* balise disparue : on repasse sur la plus proche */ }
+  }
+  if (!station) {
+    const list = await nearbyStations(spot, 6);
+    station = list.find(isFresh) || list[0] || null;
+  }
+  liveCache.set(key, { at: Date.now(), station });
+  return station;
+}
+
+async function stationHistory(id, hours = 6) {
+  const list = await getJSON(`${WINDS_API}/stations/${encodeURIComponent(id)}/historic/?duration=${hours * 3600}`);
+  return list
+    .filter(m => m['w-avg'] != null)
+    .map(m => ({ time: m._id, speed: m['w-avg'] / KMH_PER_KT, gusts: m['w-max'] != null ? m['w-max'] / KMH_PER_KT : null, dir: m['w-dir'] }))
+    .sort((a, b) => a.time - b.time);
+}
+
+function ago(unix) {
+  const min = Math.round((Date.now() / 1000 - unix) / 60);
+  if (min < 1) return "à l'instant";
+  if (min < 60) return `il y a ${min} min`;
+  return `il y a ${Math.floor(min / 60)} h ${String(min % 60).padStart(2, '0')}`;
+}
+
+const PROVIDERS = { 'openwindmap.org': 'OpenWindMap', 'ffvl.fr': 'FFVL', 'holfuy.com': 'Holfuy', 'aviationweather.gov': 'aéroport', 'windline.ch': 'Windline', 'meteoswiss.admin.ch': 'MétéoSuisse' };
+const providerName = p => PROVIDERS[p] || p;
+const kmText = d => `${d.toFixed(1).replace('.', ',')} km`;
+
+// Petite pastille « 9 kt » colorée comme le vent prévu.
+const liveChip = kn => `<span class="live-kn" style="background:${windColor(kn)};color:${windText(kn)}">${Math.round(kn)} kt</span>`;
+
+function liveLine(st) {
+  if (!st) return '📡 Aucune balise à proximité';
+  if (!isFresh(st)) return `📡 Balise sans mesure récente (${esc(st.name)})`;
+  const l = st.last;
+  const min = Math.round((Date.now() / 1000 - l.time) / 60);
+  return `<span class="nw">📡 Mesuré ${liveChip(l.speed)}</span>`
+    + (l.dir != null ? `<span class="nw">${arrow(l.dir)}${cardinal(l.dir)}</span>` : '')
+    + (l.gusts != null ? `<span class="nw">· raf. ${Math.round(l.gusts)}</span>` : '')
+    + `<span class="nw muted">· ${min < 1 ? "à l'instant" : min < 60 ? `${min} min` : ago(l.time)}</span>`;
+}
+
 // ---------- API Open-Meteo ----------
 
 async function getJSON(url) {
@@ -253,6 +352,14 @@ const windText = kn => (kn >= 25 ? '#fff' : '#000');
 // Rafales : même échelle que le vent moyen, adoucie par un peu de gris (vive mais moins saturée).
 const gustColor = kn => `color-mix(in srgb, ${windColor(kn)} 72%, #a3a3ab)`;
 
+
+// Direction d'où vient le vent, en toutes lettres : « de sud-ouest », « d'ouest »…
+function direction(deg) {
+  const words = ['nord', 'nord-nord-est', 'nord-est', 'est-nord-est', 'est', 'est-sud-est', 'sud-est', 'sud-sud-est',
+    'sud', 'sud-sud-ouest', 'sud-ouest', 'ouest-sud-ouest', 'ouest', 'ouest-nord-ouest', 'nord-ouest', 'nord-nord-ouest'];
+  const word = words[((Math.round(deg / 22.5) % 16) + 16) % 16];
+  return (/^[aeiou]/.test(word) ? "d'" : 'de ') + word;
+}
 
 function cardinal(deg) {
   const dirs = ['N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE', 'S', 'SSO', 'SO', 'OSO', 'O', 'ONO', 'NO', 'NNO'];
@@ -358,7 +465,7 @@ function renderList() {
     <ul class="list">
       ${spots.map((s, i) => {
         const inner = `
-          <div><div class="name">${esc(s.name)}</div><div class="sub" data-sub>${coordText(s)}</div></div>
+          <div><div class="name">${esc(s.name)}</div>${editing ? '' : '<div class="sub live" data-live><span class="spinner small"></span></div>'}<div class="sub" data-sub>${coordText(s)}</div></div>
           <div data-badge>${editing ? '' : '<span class="spinner"></span>'}</div>`;
         return `
           <li class="row" data-id="${esc(s.id)}">
@@ -398,7 +505,7 @@ function renderList() {
   if (!editing) {
     view.querySelectorAll('.row').forEach(row => {
       const spot = spots.find(s => s.id === row.dataset.id);
-      if (spot) loadBadge(spot, row);
+      if (spot) { loadBadge(spot, row); loadLive(spot, row); }
     });
   }
 }
@@ -533,6 +640,17 @@ function alertsLink() {
     </ul>`;
 }
 
+async function loadLive(spot, row) {
+  const slot = $('[data-live]', row);
+  if (!slot) return;
+  try {
+    const station = await liveForSpot(spot);
+    if (row.isConnected) slot.innerHTML = liveLine(station);
+  } catch {
+    if (row.isConnected) slot.textContent = '📡 Mesure indisponible';
+  }
+}
+
 async function loadBadge(spot, row) {
   const preferred = store.model;
   // ECMWF sert de repli si le modèle préféré ne couvre pas le spot.
@@ -544,7 +662,7 @@ async function loadBadge(spot, row) {
     const model = models.find(m => hasData(forecast, m));
     const point = model && currentPoint(forecast.series[model]);
     slot.innerHTML = point ? badge(point) : '<span class="muted">—</span>';
-    if (model) $('[data-sub]', row).textContent = `${modelById(model).name} · maintenant`;
+    if (model) $('[data-sub]', row).textContent = `Prévu maintenant · ${modelById(model).name}`;
   } catch {
     if (row.isConnected) slot.innerHTML = '<span class="muted">hors ligne</span>';
   }
@@ -859,6 +977,118 @@ function renderAlerts() {
 
 // ---------- Détail d'un spot ----------
 
+// Courbe des dernières heures : vent moyen (trait plein) et rafales (pointillés),
+// avec la plage 15–30 nœuds en fond.
+function historyChart(history, hours) {
+  const end = Date.now() / 1000;
+  const start = end - hours * 3600;
+  const points = history.filter(m => m.time >= start);
+  if (points.length < 2) return '<p class="muted">Pas assez de mesures pour tracer la courbe.</p>';
+  const W = 320, H = 110, L = 26, B = 18, T = 6;
+  const top = Math.max(20, ...points.map(m => m.gusts ?? m.speed)) * 1.1;
+  const x = t => L + ((t - start) / (end - start)) * (W - L - 4);
+  const y = kn => T + (1 - Math.min(kn, top) / top) * (H - T - B);
+  const line = key => points.filter(m => m[key] != null).map((m, i) => `${i ? 'L' : 'M'}${x(m.time).toFixed(1)},${y(m[key]).toFixed(1)}`).join('');
+  const step = top > 40 ? 20 : 10;
+  const grid = [];
+  for (let kn = step; kn < top; kn += step) {
+    grid.push(`<line x1="${L}" x2="${W - 4}" y1="${y(kn)}" y2="${y(kn)}" class="grid"/><text x="${L - 4}" y="${y(kn) + 3}" text-anchor="end">${kn}</text>`);
+  }
+  const labels = [];
+  for (let h = hours; h >= 0; h -= hours > 3 ? 2 : 1) {
+    labels.push(`<text x="${x(end - h * 3600)}" y="${H - 4}" text-anchor="${h ? 'middle' : 'end'}">${h ? `−${h} h` : 'maintenant'}</text>`);
+  }
+  return `
+    <svg class="history" viewBox="0 0 ${W} ${H}" role="img" aria-label="Vent mesuré ces ${hours} dernières heures">
+      <rect x="${L}" y="${y(30)}" width="${W - L - 4}" height="${y(15) - y(30)}" class="band"/>
+      ${grid.join('')}
+      <path d="${line('gusts')}" class="gust-line"/>
+      <path d="${line('speed')}" class="speed-line"/>
+      ${labels.join('')}
+    </svg>
+    <div class="legend"><span><i class="swatch speed"></i>vent moyen</span><span><i class="swatch gust"></i>rafales</span><span><i class="swatch band"></i>15–30 kt</span></div>`;
+}
+
+async function renderLive(spot, token) {
+  const box = $('#live');
+  if (!box) return;
+  let station;
+  try {
+    station = await liveForSpot(spot);
+  } catch {
+    if (token === renderToken) box.innerHTML = '<div class="card-title">📡 Vent mesuré maintenant</div><p class="muted">Mesures indisponibles (réseau ?).</p>';
+    return;
+  }
+  if (token !== renderToken) return;
+
+  const title = '<div class="card-title">📡 Vent mesuré maintenant</div>';
+  const change = `<button class="link-btn" id="change-station">${spot.station ? 'Changer de balise' : 'Choisir une autre balise'}</button>`;
+  if (!station) {
+    box.innerHTML = `${title}<p class="muted">Aucune balise trouvée près de ce spot.</p>`;
+    return;
+  }
+  const l = station.last;
+  const fresh = isFresh(station);
+  box.innerHTML = `
+    ${title}
+    ${fresh ? `
+      <div class="live-now">
+        <span class="live-big" style="background:${windColor(l.speed)};color:${windText(l.speed)}">${l.dir != null ? arrow(l.dir) : ''}${Math.round(l.speed)}<small> kt</small></span>
+        <div>
+          ${l.gusts != null ? `<div>Rafales <b>${Math.round(l.gusts)} kt</b></div>` : ''}
+          ${l.dir != null ? `<div>Vent ${direction(l.dir)}</div>` : ''}
+          <div class="muted">${ago(l.time)}</div>
+        </div>
+      </div>` : `<p class="muted">Cette balise n'a pas envoyé de mesure depuis plus de 2 h${l ? ` (dernière : ${ago(l.time)})` : ''}.</p>`}
+    <p class="sub muted">Balise <b>${esc(station.name)}</b> · ${esc(providerName(station.provider))} · à ${kmText(station.dist)} du spot${spot.station ? '' : ' · choisie automatiquement'}</p>
+    <div id="history"><span class="spinner small"></span></div>
+    ${change}
+    <div id="stations"></div>`;
+
+  $('#change-station').onclick = () => renderStationPicker(spot, token);
+
+  try {
+    const history = await stationHistory(station.id, 6);
+    if (token === renderToken && $('#history')) $('#history').innerHTML = historyChart(history, 6);
+  } catch {
+    if (token === renderToken && $('#history')) $('#history').innerHTML = '<p class="muted">Historique indisponible.</p>';
+  }
+}
+
+async function renderStationPicker(spot, token) {
+  const box = $('#stations');
+  box.innerHTML = '<span class="spinner small"></span>';
+  let list;
+  try {
+    list = await nearbyStations(spot, 8);
+  } catch {
+    box.innerHTML = '<p class="muted">Liste des balises indisponible.</p>';
+    return;
+  }
+  if (token !== renderToken) return;
+  const option = (id, title, sub, on) => `
+    <li><button class="option" data-station="${esc(id)}">
+      <span class="txt"><span>${title}</span><span class="sub muted">${sub}</span></span>
+      <span class="check">${on ? '✓' : ''}</span>
+    </button></li>`;
+  box.innerHTML = `
+    <ul class="settings-list stations">
+      ${option('', 'Automatique', 'La balise la plus proche qui mesure', !spot.station)}
+      ${list.map(st => option(st.id, esc(st.name),
+        `${esc(providerName(st.provider))} · ${kmText(st.dist)} · ${isFresh(st) ? `${Math.round(st.last.speed)} kt, ${ago(st.last.time)}` : 'hors service'}`,
+        spot.station === st.id)).join('')}
+    </ul>`;
+  box.querySelectorAll('[data-station]').forEach(btn => {
+    btn.onclick = () => {
+      const chosen = btn.dataset.station || undefined;
+      store.spots = store.spots.map(s => (s.id === spot.id ? { ...s, station: chosen } : s));
+      spot.station = chosen;
+      liveCache.clear();
+      renderLive(spot, token);
+    };
+  });
+}
+
 async function renderDetail(id) {
   teardown();
   const token = renderToken;
@@ -868,15 +1098,21 @@ async function renderDetail(id) {
   setHeader({
     title: spot.name,
     left: { label: '‹ Spots', onClick: () => { location.hash = '#/'; } },
-    right: { label: '↻', aria: 'Actualiser', big: true, onClick: () => { forecastCache.clear(); renderDetail(id); } },
+    right: { label: '↻', aria: 'Actualiser', big: true, onClick: () => { forecastCache.clear(); liveCache.clear(); renderDetail(id); } },
   });
 
   view.innerHTML = `
+    <div id="live" class="card live-card"><div class="card-title">📡 Vent mesuré maintenant</div><span class="spinner"></span></div>
     <div class="seg" id="seg">
       <button data-view="detail">Détail par modèle</button>
       <button data-view="compare">Comparer les modèles</button>
     </div>
     <div id="body"><div class="loading"><span class="spinner"></span> Chargement des modèles…</div></div>`;
+
+  renderLive(spot, token);
+  // Mesure rafraîchie toutes les 2 minutes tant que la page est ouverte
+  const liveTimer = setInterval(() => { liveCache.clear(); renderLive(spot, token); }, 2 * 60 * 1000);
+  cleanup.push(() => clearInterval(liveTimer));
 
   let forecast;
   try {

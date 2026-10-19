@@ -189,6 +189,9 @@ function toStation(raw, spot) {
     id: raw._id,
     name: raw.short || raw.name,
     provider: raw['pv-name'],
+    lat,
+    lon,
+    alt: typeof raw.alt === 'number' ? Math.round(raw.alt) : null,
     dist: distanceKm(spot.lat, spot.lon, lat, lon),
     last: last && last['w-avg'] != null ? {
       time: last._id,
@@ -252,6 +255,9 @@ function ago(unix) {
 const PROVIDERS = { 'openwindmap.org': 'OpenWindMap', 'ffvl.fr': 'FFVL', 'holfuy.com': 'Holfuy', 'aviationweather.gov': 'aéroport', 'windline.ch': 'Windline', 'meteoswiss.admin.ch': 'MétéoSuisse' };
 const providerName = p => PROVIDERS[p] || p;
 const kmText = d => `${d.toFixed(1).replace('.', ',')} km`;
+// Au-delà de 50 m, une balise mesure souvent un vent différent de celui du plan d'eau.
+const HIGH_STATION_M = 50;
+const altText = st => (st.alt == null ? 'altitude inconnue' : `alt. ${st.alt} m${st.alt > HIGH_STATION_M ? ' ⚠️' : ''}`);
 
 // Petite pastille « 9 kt » colorée comme le vent prévu.
 const liveChip = kn => `<span class="live-kn" style="background:${windColor(kn)};color:${windText(kn)}">${Math.round(kn)} kt</span>`;
@@ -422,6 +428,10 @@ function setHeader({ title, left, extra, right }) {
 function route() {
   const path = location.hash.slice(1) || '/';
   if (path.startsWith('/spot/')) renderDetail(decodeURIComponent(path.slice(6)));
+  else if (path.startsWith('/balise/')) {
+    const [id, query] = path.slice(8).split('?');
+    renderStationPage(decodeURIComponent(id), query === 'nouveau');
+  }
   else if (path === '/add') renderAdd();
   else if (path === '/alertes') renderAlerts();
   else if (path === '/reglages') renderSettings();
@@ -679,7 +689,7 @@ function renderAdd() {
     if (!pin || !name) return;
     const id = (crypto.randomUUID && crypto.randomUUID()) || String(Date.now());
     store.spots = [...store.spots, { id, name, lat: pin.lat, lon: pin.lon }];
-    location.hash = '#/';
+    location.hash = `#/balise/${encodeURIComponent(id)}?nouveau`;
   };
 
   setHeader({
@@ -1040,12 +1050,11 @@ async function renderLive(spot, token) {
           <div class="muted">${ago(l.time)}</div>
         </div>
       </div>` : `<p class="muted">Cette balise n'a pas envoyé de mesure depuis plus de 2 h${l ? ` (dernière : ${ago(l.time)})` : ''}.</p>`}
-    <p class="sub muted">Balise <b>${esc(station.name)}</b> · ${esc(providerName(station.provider))} · à ${kmText(station.dist)} du spot${spot.station ? '' : ' · choisie automatiquement'}</p>
+    <p class="sub muted">Balise <b>${esc(station.name)}</b> · ${esc(providerName(station.provider))} · à ${kmText(station.dist)} du spot · ${altText(station)}${spot.station ? '' : ' · choisie automatiquement'}</p>
     <div id="history"><span class="spinner small"></span></div>
-    ${change}
-    <div id="stations"></div>`;
+    ${change}`;
 
-  $('#change-station').onclick = () => renderStationPicker(spot, token);
+  $('#change-station').onclick = () => { location.hash = `#/balise/${encodeURIComponent(spot.id)}`; };
 
   try {
     const history = await stationHistory(station.id, 6);
@@ -1055,38 +1064,102 @@ async function renderLive(spot, token) {
   }
 }
 
-async function renderStationPicker(spot, token) {
-  const box = $('#stations');
-  box.innerHTML = '<span class="spinner small"></span>';
-  let list;
+// ---------- Choix de la balise d'un spot (carte + liste) ----------
+
+async function renderStationPage(id, isNew) {
+  teardown();
+  const token = renderToken;
+  const spot = store.spots.find(s => s.id === id);
+  if (!spot) { location.hash = '#/'; return; }
+  const done = () => { location.hash = isNew ? '#/' : `#/spot/${encodeURIComponent(id)}`; };
+
+  setHeader({
+    title: 'Choisir la balise',
+    left: isNew ? null : { label: '‹ Retour', onClick: done },
+    right: isNew ? { label: 'Plus tard', onClick: done } : null,
+  });
+
+  view.innerHTML = `
+    <p class="intro">${isNew ? `Spot <b>${esc(spot.name)}</b> ajouté ! ` : ''}Choisis la balise qui mesure le mieux le vent sur <b>${esc(spot.name)}</b> : de préférence <b>au bord de l'eau</b> et <b>à basse altitude</b>.</p>
+    <div id="station-map" class="map station-map"></div>
+    <div id="station-list" class="card"><span class="spinner"></span> Recherche des balises autour…</div>`;
+
+  let map = null;
+  if (window.L) {
+    map = L.map('station-map', { attributionControl: true }).setView([spot.lat, spot.lon], 11);
+    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+      maxZoom: 18,
+      attribution: 'Imagerie © Esri',
+    }).addTo(map);
+    L.marker([spot.lat, spot.lon], { icon: L.divIcon({ className: 'pin', html: '📍', iconSize: [32, 32], iconAnchor: [16, 30] }), zIndexOffset: 1000 })
+      .addTo(map).bindTooltip(esc(spot.name));
+    cleanup.push(() => map.remove());
+  } else {
+    $('#station-map').remove();
+  }
+
+  let stations;
   try {
-    list = await nearbyStations(spot, 8);
+    stations = await nearbyStations(spot, 10);
   } catch {
-    box.innerHTML = '<p class="muted">Liste des balises indisponible.</p>';
+    if (token === renderToken) $('#station-list').innerHTML = '<p class="muted">Impossible de charger les balises (réseau ?).</p>';
     return;
   }
   if (token !== renderToken) return;
-  const option = (id, title, sub, on) => `
-    <li><button class="option" data-station="${esc(id)}">
-      <span class="txt"><span>${title}</span><span class="sub muted">${sub}</span></span>
-      <span class="check">${on ? '✓' : ''}</span>
-    </button></li>`;
-  box.innerHTML = `
+
+  const choose = stationId => {
+    store.spots = store.spots.map(s => (s.id === spot.id ? { ...s, station: stationId || undefined } : s));
+    liveCache.clear();
+    done();
+  };
+
+  const windOf = st => (isFresh(st) ? `${Math.round(st.last.speed)} kt` : 'hors service');
+  const color = st => (isFresh(st) ? windColor(st.last.speed) : '#8e8e93');
+
+  $('#station-list').innerHTML = stations.length ? `
     <ul class="settings-list stations">
-      ${option('', 'Automatique', 'La balise la plus proche qui mesure', !spot.station)}
-      ${list.map(st => option(st.id, esc(st.name),
-        `${esc(providerName(st.provider))} · ${kmText(st.dist)} · ${isFresh(st) ? `${Math.round(st.last.speed)} kt, ${ago(st.last.time)}` : 'hors service'}`,
-        spot.station === st.id)).join('')}
-    </ul>`;
-  box.querySelectorAll('[data-station]').forEach(btn => {
-    btn.onclick = () => {
-      const chosen = btn.dataset.station || undefined;
-      store.spots = store.spots.map(s => (s.id === spot.id ? { ...s, station: chosen } : s));
-      spot.station = chosen;
-      liveCache.clear();
-      renderLive(spot, token);
-    };
+      <li><button class="option" data-station="">
+        <span class="num auto">A</span>
+        <span class="txt"><span>Automatique</span><span class="sub muted">La balise la plus proche qui mesure</span></span>
+        <span class="check">${!spot.station ? '✓' : ''}</span>
+      </button></li>
+      ${stations.map((st, i) => `
+        <li><button class="option" data-station="${esc(st.id)}" id="st-${i}">
+          <span class="num" style="background:${color(st)};color:${isFresh(st) ? windText(st.last.speed) : '#fff'}">${i + 1}</span>
+          <span class="txt"><span>${esc(st.name)}</span><span class="sub muted">${kmText(st.dist)} · ${altText(st)} · ${esc(providerName(st.provider))} · ${windOf(st)}</span></span>
+          <span class="check">${spot.station === st.id ? '✓' : ''}</span>
+        </button></li>`).join('')}
+    </ul>
+    <p class="muted">⚠️ = balise à plus de ${HIGH_STATION_M} m d'altitude : elle mesure souvent plus de vent que sur l'eau.</p>`
+    : '<p class="muted">Aucune balise trouvée autour de ce spot.</p>';
+
+  $('#station-list').querySelectorAll('[data-station]').forEach(btn => {
+    btn.onclick = () => choose(btn.dataset.station);
   });
+
+  if (map) {
+    stations.forEach((st, i) => {
+      const marker = L.marker([st.lat, st.lon], {
+        icon: L.divIcon({
+          className: '',
+          html: `<span class="map-num" style="background:${color(st)};color:${isFresh(st) ? windText(st.last.speed) : '#fff'}">${i + 1}</span>`,
+          iconSize: [26, 26],
+          iconAnchor: [13, 13],
+        }),
+      }).addTo(map);
+      marker.bindPopup(`
+        <b>${i + 1}. ${esc(st.name)}</b><br>
+        ${kmText(st.dist)} · ${altText(st)}<br>
+        ${esc(providerName(st.provider))} · ${windOf(st)}<br>
+        <button class="popup-choose" data-station="${esc(st.id)}">Choisir cette balise</button>`);
+    });
+    map.on('popupopen', e => {
+      const btn = e.popup.getElement().querySelector('.popup-choose');
+      if (btn) btn.onclick = () => choose(btn.dataset.station);
+    });
+    const bounds = L.latLngBounds([[spot.lat, spot.lon], ...stations.slice(0, 6).map(st => [st.lat, st.lon])]);
+    map.fitBounds(bounds, { padding: [30, 30], maxZoom: 13 });
+  }
 }
 
 async function renderDetail(id) {
